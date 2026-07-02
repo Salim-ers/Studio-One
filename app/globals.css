@@ -1,0 +1,94 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bronze: #9a6a3a;
+  --bronze-deep: #6f4726;
+  --bronze-light: #b9854d;
+  --ivory: #fffdf8;
+  --cream: #f8f3ec;
+  --coffee: #18110c;
+  --warm-gray: #8c8178;
+  --hairline: rgba(154, 106, 58, 0.18);
+}
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply bg-ivory text-coffee antialiased;
+    font-feature-settings: "ss01" on, "cv11" on;
+  }
+
+  ::selection {
+    background: rgba(154, 106, 58, 0.22);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--bronze);
+    outline-offset: 2px;
+    border-radius: 2px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    html {
+      scroll-behavior: auto;
+    }
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}
+
+@layer components {
+  /* Étiquette majuscule fine — utilisée pour les eyebrows et labels */
+  .eyebrow {
+    @apply text-[11px] font-medium uppercase tracking-caps text-bronze;
+  }
+
+  /* Signature Studio One : règle "pellicule" avec graduations,
+     reprise de la timeline du logo. */
+  .film-rule {
+    height: 10px;
+    background-image: linear-gradient(
+        to right,
+        var(--hairline) 1px,
+        transparent 1px
+      ),
+      linear-gradient(to bottom, transparent 4px, var(--hairline) 4px, var(--hairline) 6px, transparent 6px);
+    background-size: 14px 100%, 100% 100%;
+  }
+
+  /* Halo bronze très discret pour les scènes hero / cartes clés */
+  .bronze-halo {
+    background: radial-gradient(
+      closest-side,
+      rgba(185, 133, 77, 0.16),
+      rgba(185, 133, 77, 0.05) 55%,
+      transparent 75%
+    );
+  }
+
+  .card-surface {
+    @apply rounded-2xl border bg-ivory shadow-soft;
+    border-color: var(--hairline);
+  }
+
+  .skeleton {
+    @apply animate-shimmer rounded-lg;
+    background: linear-gradient(
+      90deg,
+      rgba(154, 106, 58, 0.07) 25%,
+      rgba(154, 106, 58, 0.14) 50%,
+      rgba(154, 106, 58, 0.07) 75%
+    );
+    background-size: 200% 100%;
+  }
+}
