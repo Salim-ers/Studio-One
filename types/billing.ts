@@ -29,4 +29,6 @@ export interface SubscriptionState {
   renewsAt: string;
   creditsTotal: number;
   creditsUsed: number;
+  /** Accès illimité : aucun crédit décompté, rendu sans paiement. */
+  unlimited?: boolean;
 }

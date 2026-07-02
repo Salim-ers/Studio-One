@@ -16,13 +16,50 @@ L'application fonctionne sans clés Stripe : les boutons de paiement
 affichent alors un message de mode démonstration au lieu de rediriger
 vers Checkout.
 
+## Comptes de démonstration
+
+L'authentification est fonctionnelle mais volontairement légère : comptes
+en mémoire, sessions signées (cookie HMAC), sans base de données. Deux
+comptes sont seedés au démarrage :
+
+| Compte | Email | Mot de passe | Plan affiché |
+|---|---|---|---|
+| Illimité | `salim.elrs@gmail.com` | `StudioOne2026!` | Illimité (∞) |
+| Growth | `demo@studio-one.test` | `DemoStudio2026!` | Growth — 5 crédits/mois |
+
+**Mode test : le paiement est désactivé.** Tout compte connecté peut
+générer une vidéo de bout en bout : tunnel en 8 étapes → « Lancer le
+rendu 4K » (aucun paiement, aucun crédit décompté) → rendu simulé
+~90 secondes → export prêt. Les plans et crédits affichés sont
+informatifs ; les routes Stripe (`app/api/stripe/*`) restent en place,
+prêtes à être rebranchées sur le tunnel. L'inscription via `/register`
+crée un compte Starter qui vit le temps du processus serveur.
+
+Variables : `AUTH_SECRET` (secret de session), `SEED_ADMIN_PASSWORD` et
+`SEED_DEMO_PASSWORD` (surcharge des mots de passe seedés). Des valeurs
+par défaut existent en développement — **définissez-les en production**.
+
+## Tests E2E (Playwright)
+
+```bash
+npx playwright install chromium   # première fois uniquement
+npm run test:e2e
+```
+
+Le serveur de dev est lancé automatiquement. Les tests couvrent la
+protection du dashboard, la connexion/déconnexion et le parcours complet
+de génération d'une vidéo avec le compte illimité (rendu simulé compris).
+Un outil externe (agent, CI) peut piloter l'app de la même façon : il lui
+suffit des identifiants ci-dessus — surchargeables via `E2E_ADMIN_EMAIL`
+et `E2E_ADMIN_PASSWORD`.
+
 ## Pages
 
 | Route | Description |
 |---|---|
 | `/` | Landing page (hero cinématique, workflow, formats, pricing, FAQ) |
 | `/pricing` | Tarifs — à la vidéo ou abonnement, bascule intégrée |
-| `/login`, `/register` | Authentification (prête à connecter : NextAuth, Clerk, Supabase…) |
+| `/login`, `/register` | Authentification fonctionnelle (sessions cookie signées, comptes en mémoire) |
 | `/dashboard` | Vue d'ensemble : stats, projets, rendu en cours, exports, modèles |
 | `/dashboard/new-video` | Tunnel de création en 8 étapes avec preview latérale |
 | `/dashboard/projects/[id]` | Page projet : storyboard, script éditable, exports |
@@ -59,21 +96,23 @@ contient un TODO à relier à votre base de données.
 ## Architecture
 
 ```
-app/            pages App Router + routes API Stripe
+app/            pages App Router + routes API (auth, projets, Stripe)
 components/
   marketing/    header, footer, hero, pricing, FAQ, auth
   dashboard/    shell, sidebar, wizard, projets, script, upload
   billing/      carte d'abonnement + Customer Portal
   motion/       AnimatedSection, HeroReveal, MagneticButton (GSAP)
   ui/           Button, Badge, Field, EmptyState, ProgressTimeline…
-lib/            pricing, mock-data, stripe, utils
+lib/            auth, session, projects-store, pricing, mock-data, stripe
 types/          video.ts, billing.ts
+e2e/            tests Playwright (auth + génération vidéo)
 public/brand/   logos Studio One
 ```
 
-Les données sont mockées dans `lib/mock-data.ts` (projets, scènes,
-abonnement, factures) : remplacez-les par vos appels base de données
-sans toucher aux composants.
+Les comptes et projets vivent en mémoire (`lib/auth.ts`,
+`lib/projects-store.ts`) et le rendu vidéo est simulé (~90 s) :
+remplacez ces modules par vos appels base de données et votre pipeline
+de rendu sans toucher aux composants.
 
 ## Déploiement
 

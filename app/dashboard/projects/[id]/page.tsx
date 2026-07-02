@@ -9,19 +9,19 @@ import { ProgressTimeline } from "@/components/ui/ProgressTimeline";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { EmptyState } from "@/components/ui/EmptyState";
-import { mockProjects, statusLabels, objectiveLabels } from "@/lib/mock-data";
+import { statusLabels, objectiveLabels } from "@/lib/mock-data";
 import { formatDate } from "@/lib/utils";
+import { requireUser } from "@/lib/auth";
+import { getProject } from "@/lib/projects-store";
+import { RenderProgress } from "@/components/dashboard/RenderProgress";
 
 interface PageProps {
   params: { id: string };
 }
 
-export function generateMetadata({ params }: PageProps): Metadata {
-  const project = mockProjects.find((p) => p.id === params.id);
-  return {
-    title: project ? `${project.name} — Studio One` : "Projet — Studio One",
-  };
-}
+export const metadata: Metadata = {
+  title: "Projet — Studio One",
+};
 
 const exportFiles = [
   { label: "Vidéo 4K · 16:9", detail: "MP4 · 3840 × 2160" },
@@ -32,8 +32,9 @@ const exportFiles = [
   { label: "Storyboard", detail: "PDF" },
 ];
 
-export default function ProjectPage({ params }: PageProps) {
-  const project = mockProjects.find((p) => p.id === params.id);
+export default async function ProjectPage({ params }: PageProps) {
+  const user = await requireUser();
+  const project = getProject(user.email, params.id);
   if (!project) notFound();
 
   const status = statusLabels[project.status];
@@ -46,6 +47,8 @@ export default function ProjectPage({ params }: PageProps) {
     <DashboardShell
       title={project.name}
       subtitle={`${objectiveLabels[project.objective]} · ${project.duration} secondes · ${project.language}`}
+      user={{ name: user.name, email: user.email }}
+      subscription={user.subscription}
       actions={
         <Badge tone={status.tone} pulse={isRendering}>
           {status.label}
@@ -74,7 +77,7 @@ export default function ProjectPage({ params }: PageProps) {
             {isExportReady && <Button size="sm">Télécharger les exports</Button>}
             {isRendering && (
               <Button size="sm" disabled>
-                Rendu en cours — {project.renderProgress} %
+                Rendu en cours…
               </Button>
             )}
             {isDraft && (
@@ -86,18 +89,10 @@ export default function ProjectPage({ params }: PageProps) {
         </div>
 
         {isRendering && (
-          <div className="mt-5">
-            <div className="h-2 overflow-hidden rounded-full bg-cream" aria-hidden>
-              <div
-                className="h-full rounded-full bg-bronze transition-all duration-700"
-                style={{ width: `${project.renderProgress}%` }}
-              />
-            </div>
-            <p className="mt-2 text-xs text-warm-gray" role="status">
-              Rendu 4K en cours — étape colorimétrie. Temps restant estimé : 4
-              minutes. Vous pouvez quitter cette page, le rendu continue.
-            </p>
-          </div>
+          <RenderProgress
+            projectId={project.id}
+            initialProgress={project.renderProgress}
+          />
         )}
       </section>
 

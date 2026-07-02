@@ -12,13 +12,14 @@ export default function RegisterPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
+  async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setError(null);
     const form = new FormData(e.currentTarget);
     const name = String(form.get("name") ?? "");
     const email = String(form.get("email") ?? "");
     const password = String(form.get("password") ?? "");
+    const company = String(form.get("company") ?? "");
 
     if (name.trim().length < 2) {
       setError("Entrez votre nom complet.");
@@ -33,9 +34,25 @@ export default function RegisterPage() {
       return;
     }
 
-    // Inscription prête à connecter à votre fournisseur d'authentification.
     setLoading(true);
-    setTimeout(() => router.push("/dashboard"), 600);
+    try {
+      const res = await fetch("/api/auth/register", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, email, password, company }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error ?? "Inscription impossible. Réessayez.");
+        setLoading(false);
+        return;
+      }
+      router.push("/dashboard");
+      router.refresh();
+    } catch {
+      setError("Connexion impossible. Vérifiez votre réseau puis réessayez.");
+      setLoading(false);
+    }
   }
 
   return (

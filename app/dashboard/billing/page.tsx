@@ -5,33 +5,41 @@ import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { mockInvoices } from "@/lib/mock-data";
 import { formatDate, formatEuros } from "@/lib/utils";
+import { requireUser, DEMO_EMAIL } from "@/lib/auth";
 
 export const metadata: Metadata = {
   title: "Facturation — Studio One",
 };
 
-export default function BillingPage() {
+export default async function BillingPage() {
+  const user = await requireUser();
+  // Les factures de démonstration appartiennent au compte Growth (payant) —
+  // le compte illimité ne paie rien.
+  const invoices = user.email === DEMO_EMAIL ? mockInvoices : [];
+
   return (
     <DashboardShell
       title="Facturation"
       subtitle="Votre abonnement, vos crédits vidéo et votre historique."
+      user={{ name: user.name, email: user.email }}
+      subscription={user.subscription}
     >
       <div className="grid gap-8 xl:grid-cols-[1.5fr_1fr]">
         <div className="min-w-0 space-y-8">
-          <BillingCard />
+          <BillingCard subscription={user.subscription} />
 
           <section aria-label="Historique de facturation">
             <h2 className="mb-4 font-display text-lg text-coffee">
               Historique de facturation
             </h2>
-            {mockInvoices.length === 0 ? (
+            {invoices.length === 0 ? (
               <p className="card-surface p-6 text-sm text-warm-gray">
                 Aucune facture pour l&apos;instant. Elles apparaîtront ici
                 après votre premier paiement.
               </p>
             ) : (
               <ul className="card-surface divide-y divide-[rgba(154,106,58,0.18)]">
-                {mockInvoices.map((invoice) => (
+                {invoices.map((invoice) => (
                   <li
                     key={invoice.id}
                     className="flex flex-col gap-2 p-5 sm:flex-row sm:items-center sm:justify-between"

@@ -12,7 +12,7 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
+  async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setError(null);
     const form = new FormData(e.currentTarget);
@@ -28,9 +28,31 @@ export default function LoginPage() {
       return;
     }
 
-    // Authentification prête à connecter (NextAuth, Clerk, Supabase…).
     setLoading(true);
-    setTimeout(() => router.push("/dashboard"), 600);
+    try {
+      const res = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error ?? "Connexion impossible. Réessayez.");
+        setLoading(false);
+        return;
+      }
+      const next = new URLSearchParams(window.location.search).get("next");
+      // "/chemin" interne uniquement — "//evil.com" serait une URL externe.
+      const safeNext =
+        next && next.startsWith("/") && !next.startsWith("//")
+          ? next
+          : "/dashboard";
+      router.push(safeNext);
+      router.refresh();
+    } catch {
+      setError("Connexion impossible. Vérifiez votre réseau puis réessayez.");
+      setLoading(false);
+    }
   }
 
   return (
@@ -87,6 +109,18 @@ export default function LoginPage() {
           </Link>
         </p>
       </form>
+
+      {process.env.NODE_ENV === "development" && (
+        <div className="mt-6 rounded-xl border border-hairline bg-cream/50 p-4 text-xs leading-relaxed text-warm-gray">
+          <p className="font-medium text-coffee">Comptes de démonstration (dev)</p>
+          <p className="mt-1.5">
+            Accès illimité : <span className="font-medium text-bronze-deep">salim.elrs@gmail.com</span> · StudioOne2026!
+          </p>
+          <p>
+            Compte Growth : <span className="font-medium text-bronze-deep">demo@studio-one.test</span> · DemoStudio2026!
+          </p>
+        </div>
+      )}
     </AuthShell>
   );
 }

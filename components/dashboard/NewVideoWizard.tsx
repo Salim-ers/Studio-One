@@ -1,13 +1,13 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import gsap from "gsap";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 import { Field, TextInput, TextArea, Select } from "@/components/ui/Field";
 import { UploadDropzone } from "@/components/dashboard/UploadDropzone";
-import { perVideoPlans } from "@/lib/pricing";
-import { cn, formatEuros } from "@/lib/utils";
+import { cn } from "@/lib/utils";
 import type { VideoDuration, VideoObjective, VideoTone } from "@/types/video";
 
 /* ── Données du tunnel ─────────────────────────────────────────── */
@@ -125,12 +125,13 @@ function buildScript(state: WizardState): string {
 /* ── Composant principal ───────────────────────────────────────── */
 
 export function NewVideoWizard() {
+  const router = useRouter();
   const [step, setStep] = useState(0);
   const [state, setState] = useState<WizardState>(initialState);
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved">("idle");
   const [generating, setGenerating] = useState(false);
-  const [checkoutNotice, setCheckoutNotice] = useState<string | null>(null);
-  const [checkoutLoading, setCheckoutLoading] = useState(false);
+  const [launchNotice, setLaunchNotice] = useState<string | null>(null);
+  const [launching, setLaunching] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
   const saveTimer = useRef<ReturnType<typeof setTimeout>>();
 
@@ -167,8 +168,6 @@ export function NewVideoWizard() {
   }, [state.duration]);
 
   const suggested = objectives.find((o) => o.key === state.objective);
-  const recommendedPlan =
-    perVideoPlans.find((p) => p.duration === state.duration) ?? perVideoPlans[1];
 
   const canContinue = [
     state.objective !== null,
@@ -206,27 +205,42 @@ export function NewVideoWizard() {
     }, 900);
   }
 
-  async function startCheckout() {
-    setCheckoutLoading(true);
-    setCheckoutNotice(null);
+  async function launchRender() {
+    setLaunching(true);
+    setLaunchNotice(null);
     try {
-      const res = await fetch("/api/stripe/checkout", {
+      const res = await fetch("/api/projects", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ planId: recommendedPlan.id }),
+        body: JSON.stringify({
+          objective: state.objective,
+          duration: state.duration,
+          productName: state.productName,
+          productUrl: state.productUrl,
+          sector: state.sector,
+          audience: state.audience,
+          problem: state.problem,
+          promise: state.promise,
+          tone: state.tone,
+          language: state.language,
+          cta: state.cta,
+          scriptText: state.scriptText,
+          subtitles: state.subtitles,
+        }),
       });
       const data = await res.json();
-      if (data.url) {
-        window.location.href = data.url;
+      if (res.ok && data.project) {
+        router.push(`/dashboard/projects/${data.project.id}`);
+        router.refresh();
         return;
       }
-      setCheckoutNotice(
-        data.message ?? data.error ?? "Le paiement est momentanément indisponible."
+      setLaunchNotice(
+        data.error ?? "Le lancement du rendu a échoué. Réessayez."
       );
+      setLaunching(false);
     } catch {
-      setCheckoutNotice("Connexion impossible. Vérifiez votre réseau puis réessayez.");
-    } finally {
-      setCheckoutLoading(false);
+      setLaunchNotice("Connexion impossible. Vérifiez votre réseau puis réessayez.");
+      setLaunching(false);
     }
   }
 
@@ -728,8 +742,8 @@ export function NewVideoWizard() {
                 Checklist finale, puis export.
               </h2>
               <p className="mt-2 text-sm text-warm-gray">
-                Le rendu 4K se lance après le paiement. Vous recevrez la vidéo,
-                les sous-titres SRT, le script et le storyboard PDF.
+                Lancez le rendu 4K directement : vous recevrez la vidéo, les
+                sous-titres SRT, le script et le storyboard PDF.
               </p>
 
               <ul className="mt-6 space-y-2.5" aria-label="Checklist avant export">
@@ -766,42 +780,37 @@ export function NewVideoWizard() {
               <div className="mt-8 rounded-2xl border border-bronze/30 bg-[#F3E9DC]/50 p-6">
                 <div className="flex flex-wrap items-center justify-between gap-4">
                   <div>
-                    <p className="eyebrow">Offre correspondante</p>
+                    <p className="eyebrow">Mode test</p>
                     <p className="mt-1 font-display text-xl text-coffee">
-                      {recommendedPlan.name} — {recommendedPlan.duration} secondes
+                      Rendu 4K sans paiement
                     </p>
                     <p className="mt-1 text-xs text-warm-gray">
-                      Export 4K · Script voix off · Sous-titres · Storyboard PDF
+                      Le paiement est désactivé pendant la phase de test — le
+                      rendu se lance immédiatement.
                     </p>
                   </div>
-                  <p className="font-display text-3xl text-coffee">
-                    {formatEuros(recommendedPlan.price)}
-                    <span className="ml-1 text-sm font-sans text-warm-gray">/ vidéo</span>
-                  </p>
+                  <Badge tone="bronze">{state.duration ?? 90} s · 4K</Badge>
                 </div>
                 <Button
-                  onClick={startCheckout}
-                  disabled={!checklistComplete || checkoutLoading}
+                  onClick={launchRender}
+                  disabled={!checklistComplete || launching}
                   size="lg"
                   className="mt-5 w-full"
                 >
-                  {checkoutLoading
-                    ? "Redirection vers Stripe…"
-                    : "Payer et lancer le rendu 4K"}
+                  {launching ? "Lancement du rendu…" : "Lancer le rendu 4K"}
                 </Button>
                 {!checklistComplete && (
                   <p className="mt-3 text-center text-xs text-amber-800">
                     Complétez la checklist ci-dessus pour lancer le rendu.
                   </p>
                 )}
-                {checkoutNotice && (
+                {launchNotice && (
                   <p role="status" className="mt-3 rounded-lg bg-ivory px-4 py-2.5 text-xs leading-relaxed text-bronze-deep">
-                    {checkoutNotice}
+                    {launchNotice}
                   </p>
                 )}
                 <p className="mt-3 text-center text-[11px] text-warm-gray">
-                  Paiement sécurisé par Stripe. Un crédit d&apos;abonnement peut
-                  aussi être utilisé si votre plan le permet.
+                  Export 4K · Script voix off · Sous-titres · Storyboard PDF
                 </p>
               </div>
             </>
@@ -907,7 +916,7 @@ export function NewVideoWizard() {
             {step === 6 &&
               "80 % des vues LinkedIn se font sans le son : gardez les sous-titres incrustés pour ce canal."}
             {step === 7 &&
-              "Après paiement, le rendu prend généralement moins de 15 minutes. Vous pourrez suivre la progression depuis la page projet."}
+              "Le rendu simulé prend environ 90 secondes. Vous pourrez suivre la progression en temps réel depuis la page projet."}
           </p>
         </div>
       </aside>

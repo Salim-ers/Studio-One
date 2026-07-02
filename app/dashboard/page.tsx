@@ -5,8 +5,10 @@ import { ProjectCard } from "@/components/dashboard/ProjectCard";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 import { EmptyState } from "@/components/ui/EmptyState";
-import { mockProjects, mockSubscription, statusLabels } from "@/lib/mock-data";
+import { statusLabels } from "@/lib/mock-data";
 import { formatDate } from "@/lib/utils";
+import { requireUser } from "@/lib/auth";
+import { listProjects } from "@/lib/projects-store";
 
 export const metadata: Metadata = {
   title: "Tableau de bord — Studio One",
@@ -25,30 +27,35 @@ const tips = [
   "Terminez toujours par un CTA unique : un lien, une action, pas trois options.",
 ];
 
-export default function DashboardPage() {
-  const inProgress = mockProjects.filter(
-    (p) => p.status !== "export_ready"
-  );
-  const exported = mockProjects.filter((p) => p.status === "export_ready");
-  const rendering = mockProjects.find((p) => p.status === "rendering");
-  const creditsLeft =
-    mockSubscription.creditsTotal - mockSubscription.creditsUsed;
+export default async function DashboardPage() {
+  const user = await requireUser();
+  const subscription = user.subscription;
+  const projects = listProjects(user.email);
+
+  const inProgress = projects.filter((p) => p.status !== "export_ready");
+  const exported = projects.filter((p) => p.status === "export_ready");
+  const rendering = projects.find((p) => p.status === "rendering");
+  const creditsLeft = subscription.creditsTotal - subscription.creditsUsed;
   const lastExport = exported[0];
 
   const stats = [
-    { label: "Vidéos créées", value: String(mockProjects.length) },
+    { label: "Vidéos créées", value: String(projects.length) },
     { label: "En cours", value: String(inProgress.length) },
     {
       label: "Crédits restants",
-      value: `${creditsLeft} / ${mockSubscription.creditsTotal}`,
+      value: subscription.unlimited
+        ? "Illimité"
+        : `${creditsLeft} / ${subscription.creditsTotal}`,
     },
-    { label: "Abonnement", value: mockSubscription.planName, badge: "Actif" },
+    { label: "Abonnement", value: subscription.planName, badge: "Actif" },
   ];
 
   return (
     <DashboardShell
       title="Vue d'ensemble"
       subtitle="Vos projets vidéo, vos crédits et vos derniers exports."
+      user={{ name: user.name, email: user.email }}
+      subscription={subscription}
       actions={
         <Button href="/dashboard/new-video" size="md">
           <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden>
@@ -84,8 +91,8 @@ export default function DashboardPage() {
               </h2>
               <p className="mt-1 text-sm text-warm-gray">
                 Rendu 4K · {rendering.duration} secondes ·{" "}
-                {rendering.formats.join(", ")} — vous recevrez une notification
-                dès que l&apos;export est prêt.
+                {rendering.formats.join(", ")} — suivez la progression en
+                temps réel depuis la page projet.
               </p>
             </div>
             <div className="w-full md:w-72">
@@ -119,11 +126,11 @@ export default function DashboardPage() {
             <div className="mb-4 flex items-center justify-between">
               <h2 className="font-display text-lg text-coffee">Projets vidéo</h2>
               <span className="text-xs text-warm-gray">
-                {mockProjects.length} projet{mockProjects.length > 1 ? "s" : ""}
+                {projects.length} projet{projects.length > 1 ? "s" : ""}
               </span>
             </div>
 
-            {mockProjects.length === 0 ? (
+            {projects.length === 0 ? (
               <EmptyState
                 title="Aucun projet pour l'instant"
                 description="Votre première vidéo de démonstration est à cinq étapes d'ici. Décrivez votre produit, ajoutez vos captures, validez le storyboard."
@@ -132,7 +139,7 @@ export default function DashboardPage() {
               />
             ) : (
               <div className="grid gap-4 md:grid-cols-2">
-                {mockProjects.map((project) => (
+                {projects.map((project) => (
                   <ProjectCard key={project.id} project={project} />
                 ))}
               </div>

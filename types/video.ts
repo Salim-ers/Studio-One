@@ -63,6 +63,8 @@ export interface VideoProject {
   createdAt: string;
   updatedAt: string;
   lastExportAt?: string;
+  /** Début du rendu simulé — la progression est calculée à la lecture. */
+  renderStartedAt?: string;
 }
 
 export interface ProjectBrief {

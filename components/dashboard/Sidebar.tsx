@@ -5,6 +5,7 @@ import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { mockSubscription } from "@/lib/mock-data";
+import type { SubscriptionState } from "@/types/billing";
 
 const nav = [
   {
@@ -30,17 +31,6 @@ const nav = [
     ),
   },
   {
-    href: "/dashboard/projects/prj-nova-crm",
-    label: "Projets",
-    match: "/dashboard/projects",
-    icon: (
-      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden>
-        <rect x="1.5" y="3" width="10" height="10" rx="1.5" stroke="currentColor" strokeWidth="1.3" />
-        <path d="M11.5 6.5l3-2v7l-3-2" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" />
-      </svg>
-    ),
-  },
-  {
     href: "/dashboard/billing",
     label: "Facturation",
     icon: (
@@ -52,9 +42,13 @@ const nav = [
   },
 ];
 
-export function Sidebar() {
+export function Sidebar({
+  subscription = mockSubscription,
+}: {
+  subscription?: SubscriptionState;
+}) {
   const pathname = usePathname();
-  const creditsLeft = mockSubscription.creditsTotal - mockSubscription.creditsUsed;
+  const creditsLeft = subscription.creditsTotal - subscription.creditsUsed;
 
   return (
     <aside className="hidden w-60 shrink-0 flex-col border-r border-hairline bg-ivory lg:flex">
@@ -65,9 +59,7 @@ export function Sidebar() {
 
       <nav className="flex-1 space-y-1 px-3 py-5" aria-label="Navigation du tableau de bord">
         {nav.map((item) => {
-          const active = item.match
-            ? pathname.startsWith(item.match)
-            : pathname === item.href;
+          const active = pathname === item.href;
           return (
             <Link
               key={item.href}
@@ -90,19 +82,32 @@ export function Sidebar() {
       <div className="border-t border-hairline p-4">
         <div className="rounded-xl border border-hairline bg-cream/70 p-4">
           <p className="text-[11px] uppercase tracking-caps text-bronze">
-            Plan {mockSubscription.planName}
+            Plan {subscription.planName}
           </p>
-          <p className="mt-2 text-sm text-coffee">
-            <span className="font-display text-2xl">{creditsLeft}</span>{" "}
-            <span className="text-warm-gray">
-              vidéo{creditsLeft > 1 ? "s" : ""} restante{creditsLeft > 1 ? "s" : ""} ce mois
-            </span>
-          </p>
+          {subscription.unlimited ? (
+            <p className="mt-2 text-sm text-coffee">
+              <span className="font-display text-2xl">∞</span>{" "}
+              <span className="text-warm-gray">vidéos illimitées</span>
+            </p>
+          ) : (
+            <p className="mt-2 text-sm text-coffee">
+              <span className="font-display text-2xl">{creditsLeft}</span>{" "}
+              <span className="text-warm-gray">
+                vidéo{creditsLeft > 1 ? "s" : ""} restante{creditsLeft > 1 ? "s" : ""} ce mois
+              </span>
+            </p>
+          )}
           <div className="mt-3 h-1.5 rounded-full bg-ivory" aria-hidden>
             <div
               className="h-full rounded-full bg-bronze"
               style={{
-                width: `${(creditsLeft / mockSubscription.creditsTotal) * 100}%`,
+                width: subscription.unlimited
+                  ? "100%"
+                  : `${
+                      subscription.creditsTotal > 0
+                        ? (creditsLeft / subscription.creditsTotal) * 100
+                        : 0
+                    }%`,
               }}
             />
           </div>
