@@ -45,7 +45,22 @@ Les quatre projets d'exemple, eux, sont seedés côté serveur.
 vidéo de démonstration encodée image par image via WebCodecs (MP4 H.264,
 repli WebM VP8/VP9) aux formats 16:9, 9:16 et 1:1 avec sous-titres
 incrustés (sans audio), sous-titres SRT calés sur les scènes, script et
-storyboard en fichiers texte.
+storyboard en fichiers texte. Le rendu est un vrai montage animé (fond
+animé, typographie cinétique, mock d'interface, effet Ken Burns sur les
+captures produit, ouverture et CTA) — voir `lib/video-scenes.ts`.
+
+## Captures produit
+
+Dépose des captures de ton SaaS à l'étape « Assets » du tunnel : elles sont
+réduites côté client et animées (zoom, panoramique) dans la vidéo. Pour les
+récupérer automatiquement, un script Playwright se connecte à ton app et
+capture les écrans clés (voir `references/README.md`) :
+
+```bash
+cp capture.config.example.json capture.config.json   # puis édite-le
+npm run capture                 # login automatique (sélecteurs)
+npm run capture -- --manual     # login à la main (2FA, Google…)
+```
 
 Variables : `AUTH_SECRET` (secret de session), `SEED_ADMIN_PASSWORD` et
 `SEED_DEMO_PASSWORD` (surcharge des mots de passe seedés). Des valeurs

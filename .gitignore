@@ -10,3 +10,8 @@ next-env.d.ts
 test-results
 playwright-report
 .playwright
+
+# Capture SaaS : config avec identifiants + captures produit (privées)
+capture.config.json
+references/produit/*
+!references/produit/.gitkeep

@@ -1,0 +1,20 @@
+{
+  "baseUrl": "https://app.ton-saas.com",
+  "output": "references/produit",
+  "viewport": { "width": 1440, "height": 900 },
+
+  "login": {
+    "mode": "auto",
+    "url": "/login",
+    "emailSelector": "#email",
+    "passwordSelector": "#password",
+    "submitSelector": "button[type=submit]",
+    "waitForSelector": "nav"
+  },
+
+  "pages": [
+    { "name": "dashboard", "path": "/dashboard", "delayMs": 800 },
+    { "name": "fonctionnalite-cle", "path": "/feature", "waitFor": "main", "delayMs": 600 },
+    { "name": "rapports", "path": "/reports", "delayMs": 600 }
+  ]
+}
