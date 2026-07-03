@@ -35,6 +35,12 @@ informatifs ; les routes Stripe (`app/api/stripe/*`) restent en place,
 prêtes à être rebranchées sur le tunnel. L'inscription via `/register`
 crée un compte Starter qui vit le temps du processus serveur.
 
+**Les projets créés sont stockés dans votre navigateur** (localStorage)
+et la progression du rendu se calcule depuis l'horloge : le parcours
+fonctionne donc aussi en déploiement serverless (Vercel), sans base de
+données. Conséquence : vos projets sont propres à chaque navigateur.
+Les quatre projets d'exemple, eux, sont seedés côté serveur.
+
 Variables : `AUTH_SECRET` (secret de session), `SEED_ADMIN_PASSWORD` et
 `SEED_DEMO_PASSWORD` (surcharge des mots de passe seedés). Des valeurs
 par défaut existent en développement — **définissez-les en production**.
@@ -96,23 +102,24 @@ contient un TODO à relier à votre base de données.
 ## Architecture
 
 ```
-app/            pages App Router + routes API (auth, projets, Stripe)
+app/            pages App Router + routes API (auth, Stripe)
 components/
   marketing/    header, footer, hero, pricing, FAQ, auth
   dashboard/    shell, sidebar, wizard, projets, script, upload
   billing/      carte d'abonnement + Customer Portal
   motion/       AnimatedSection, HeroReveal, MagneticButton (GSAP)
   ui/           Button, Badge, Field, EmptyState, ProgressTimeline…
-lib/            auth, session, projects-store, pricing, mock-data, stripe
+lib/            auth, session, project-factory, local-projects,
+                projects-store, render, pricing, mock-data, stripe
 types/          video.ts, billing.ts
 e2e/            tests Playwright (auth + génération vidéo)
 public/brand/   logos Studio One
 ```
 
-Les comptes et projets vivent en mémoire (`lib/auth.ts`,
-`lib/projects-store.ts`) et le rendu vidéo est simulé (~90 s) :
-remplacez ces modules par vos appels base de données et votre pipeline
-de rendu sans toucher aux composants.
+Les comptes vivent en mémoire (`lib/auth.ts`), les projets créés dans le
+navigateur (`lib/local-projects.ts`), et le rendu vidéo est simulé
+(~90 s, `lib/render.ts`) : remplacez ces modules par vos appels base de
+données et votre pipeline de rendu sans toucher aux composants.
 
 ## Déploiement
 

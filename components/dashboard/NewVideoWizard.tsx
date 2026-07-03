@@ -7,6 +7,8 @@ import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 import { Field, TextInput, TextArea, Select } from "@/components/ui/Field";
 import { UploadDropzone } from "@/components/dashboard/UploadDropzone";
+import { buildProject } from "@/lib/project-factory";
+import { saveLocalProject } from "@/lib/local-projects";
 import { cn } from "@/lib/utils";
 import type { VideoDuration, VideoObjective, VideoTone } from "@/types/video";
 
@@ -205,43 +207,38 @@ export function NewVideoWizard() {
     }, 900);
   }
 
-  async function launchRender() {
+  function launchRender() {
+    if (!state.objective || !state.duration) return;
     setLaunching(true);
     setLaunchNotice(null);
-    try {
-      const res = await fetch("/api/projects", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          objective: state.objective,
-          duration: state.duration,
-          productName: state.productName,
-          productUrl: state.productUrl,
-          sector: state.sector,
-          audience: state.audience,
-          problem: state.problem,
-          promise: state.promise,
-          tone: state.tone,
-          language: state.language,
-          cta: state.cta,
-          scriptText: state.scriptText,
-          subtitles: state.subtitles,
-        }),
-      });
-      const data = await res.json();
-      if (res.ok && data.project) {
-        router.push(`/dashboard/projects/${data.project.id}`);
-        router.refresh();
-        return;
-      }
+
+    // Le projet est construit à partir du brief et conservé dans le
+    // navigateur : aucun serveur requis, le rendu simulé démarre tout de suite.
+    const project = buildProject({
+      objective: state.objective,
+      duration: state.duration,
+      productName: state.productName.trim(),
+      productUrl: state.productUrl,
+      sector: state.sector,
+      audience: state.audience,
+      problem: state.problem,
+      promise: state.promise,
+      tone: state.tone,
+      language: state.language,
+      cta: state.cta,
+      scriptText: state.scriptText,
+      subtitles: state.subtitles,
+    });
+
+    if (!saveLocalProject(project)) {
       setLaunchNotice(
-        data.error ?? "Le lancement du rendu a échoué. Réessayez."
+        "Impossible d'enregistrer le projet dans ce navigateur (stockage local indisponible)."
       );
       setLaunching(false);
-    } catch {
-      setLaunchNotice("Connexion impossible. Vérifiez votre réseau puis réessayez.");
-      setLaunching(false);
+      return;
     }
+
+    router.push(`/dashboard/projects/${project.id}`);
   }
 
   /* ── Rendu ── */

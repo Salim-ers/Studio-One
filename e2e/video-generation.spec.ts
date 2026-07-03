@@ -69,10 +69,10 @@ test.describe("Génération de vidéo — accès illimité", () => {
     await expect(
       page.getByRole("button", { name: /Télécharger les exports/ })
     ).toBeVisible();
-  });
 
-  test("le projet créé apparaît sur le dashboard", async ({ page }) => {
-    await login(page, ADMIN.email, ADMIN.password);
+    // Le projet créé apparaît sur le dashboard (stocké dans ce navigateur,
+    // donc vérifié dans le même contexte Playwright).
+    await page.goto("/dashboard");
     await expect(
       page.getByRole("heading", { name: "Vue d'ensemble" })
     ).toBeVisible();
