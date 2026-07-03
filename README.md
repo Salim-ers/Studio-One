@@ -41,6 +41,12 @@ fonctionne donc aussi en déploiement serverless (Vercel), sans base de
 données. Conséquence : vos projets sont propres à chaque navigateur.
 Les quatre projets d'exemple, eux, sont seedés côté serveur.
 
+**Les exports se téléchargent réellement**, générés dans le navigateur :
+vidéo de démonstration encodée image par image via WebCodecs (MP4 H.264,
+repli WebM VP8/VP9) aux formats 16:9, 9:16 et 1:1 avec sous-titres
+incrustés (sans audio), sous-titres SRT calés sur les scènes, script et
+storyboard en fichiers texte.
+
 Variables : `AUTH_SECRET` (secret de session), `SEED_ADMIN_PASSWORD` et
 `SEED_DEMO_PASSWORD` (surcharge des mots de passe seedés). Des valeurs
 par défaut existent en développement — **définissez-les en production**.

@@ -15,7 +15,14 @@ export default defineConfig({
     locale: "fr-FR",
     trace: "on-first-retry",
   },
-  projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
+  projects: [
+    {
+      name: "chrome",
+      // Chrome installé (canal stable) : le Chromium embarqué de Playwright
+      // n'a pas les codecs propriétaires et crashe sur l'encodage WebCodecs.
+      use: { ...devices["Desktop Chrome"], channel: "chrome" },
+    },
+  ],
   webServer: {
     command: "npm run dev",
     url: "http://localhost:3000",

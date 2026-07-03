@@ -6,6 +6,7 @@ import { DashboardShell, type ShellUser } from "@/components/dashboard/Dashboard
 import { VideoPreviewCard } from "@/components/dashboard/VideoPreviewCard";
 import { StoryboardSceneCard } from "@/components/dashboard/StoryboardSceneCard";
 import { ScriptEditor } from "@/components/dashboard/ScriptEditor";
+import { ExportsPanel } from "@/components/dashboard/ExportsPanel";
 import { ProgressTimeline } from "@/components/ui/ProgressTimeline";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -16,15 +17,6 @@ import { RENDER_DURATION_MS, withRenderProgress } from "@/lib/render";
 import { saveLocalProject } from "@/lib/local-projects";
 import type { VideoProject } from "@/types/video";
 import type { SubscriptionState } from "@/types/billing";
-
-const exportFiles = [
-  { label: "Vidéo 4K · 16:9", detail: "MP4 · 3840 × 2160" },
-  { label: "Format vertical · 9:16", detail: "MP4 · 2160 × 3840" },
-  { label: "Format carré · 1:1", detail: "MP4 · 2160 × 2160" },
-  { label: "Sous-titres", detail: "Fichier SRT" },
-  { label: "Script voix off", detail: "PDF" },
-  { label: "Storyboard", detail: "PDF" },
-];
 
 /**
  * Page projet complète, côté client : la progression du rendu simulé se
@@ -103,7 +95,18 @@ export function ProjectView({
               Modifier le storyboard
             </Button>
             {canRender && <Button size="sm">Lancer le rendu 4K</Button>}
-            {isExportReady && <Button size="sm">Télécharger les exports</Button>}
+            {isExportReady && (
+              <Button
+                size="sm"
+                onClick={() =>
+                  document
+                    .getElementById("exports")
+                    ?.scrollIntoView({ behavior: "smooth", block: "start" })
+                }
+              >
+                Télécharger les exports
+              </Button>
+            )}
             {isRendering && (
               <Button size="sm" disabled>
                 Rendu en cours…
@@ -210,39 +213,15 @@ export function ProjectView({
           </section>
 
           {/* Exports */}
-          <section aria-label="Fichiers d'export">
+          <section aria-label="Fichiers d'export" id="exports" className="scroll-mt-24">
             <h2 className="mb-4 font-display text-lg text-coffee">Exports</h2>
             {isExportReady ? (
-              <ul className="card-surface divide-y divide-[rgba(154,106,58,0.18)]">
-                {exportFiles
-                  .filter(
-                    (f) =>
-                      !f.label.includes(":") ||
-                      project.formats.some((fmt) => f.label.includes(fmt))
-                  )
-                  .map((file) => (
-                    <li
-                      key={file.label}
-                      className="flex items-center justify-between gap-3 p-4"
-                    >
-                      <div>
-                        <p className="text-sm font-medium text-coffee">{file.label}</p>
-                        <p className="text-xs text-warm-gray">{file.detail}</p>
-                      </div>
-                      <button className="inline-flex items-center gap-1.5 rounded-full border border-hairline-strong px-3.5 py-1.5 text-xs font-medium text-coffee transition-all hover:border-bronze hover:text-bronze-deep">
-                        <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden>
-                          <path d="M6 1.5V8m0 0L3.5 5.5M6 8l2.5-2.5M2 10.5h8" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
-                        </svg>
-                        Télécharger
-                      </button>
-                    </li>
-                  ))}
-              </ul>
+              <ExportsPanel project={project} />
             ) : (
               <p className="card-surface p-5 text-sm leading-relaxed text-warm-gray">
-                Les fichiers d&apos;export — vidéo 4K, sous-titres SRT, script
-                et storyboard PDF — apparaîtront ici une fois le rendu terminé
-                et validé.
+                Les fichiers d&apos;export — vidéo, sous-titres SRT, script et
+                storyboard — apparaîtront ici une fois le rendu terminé et
+                validé.
               </p>
             )}
           </section>

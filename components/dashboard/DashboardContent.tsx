@@ -196,7 +196,7 @@ export function DashboardContent({
                         href={`/dashboard/projects/${project.id}`}
                         className="text-xs font-medium text-bronze-deep underline-offset-4 hover:underline"
                       >
-                        Télécharger
+                        Ouvrir
                       </Link>
                     </div>
                   </li>

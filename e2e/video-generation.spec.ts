@@ -1,3 +1,4 @@
+import { statSync } from "fs";
 import { test, expect } from "@playwright/test";
 import { ADMIN, login } from "./helpers";
 
@@ -10,7 +11,7 @@ test.describe("Génération de vidéo — accès illimité", () => {
   test("crée une vidéo de bout en bout et obtient l'export", async ({
     page,
   }) => {
-    test.setTimeout(240_000);
+    test.setTimeout(480_000);
 
     await login(page, ADMIN.email, ADMIN.password);
     await page.goto("/dashboard/new-video");
@@ -69,6 +70,30 @@ test.describe("Génération de vidéo — accès illimité", () => {
     await expect(
       page.getByRole("button", { name: /Télécharger les exports/ })
     ).toBeVisible();
+
+    // Les sous-titres SRT se téléchargent réellement
+    // ("Fichier SRT" : les lignes vidéo contiennent aussi "sous-titres incrustés")
+    const srtRow = page
+      .getByRole("listitem")
+      .filter({ hasText: "Fichier SRT" });
+    const srtDownloadPromise = page.waitForEvent("download");
+    await srtRow.getByRole("button", { name: "Télécharger" }).click();
+    const srtDownload = await srtDownloadPromise;
+    expect(srtDownload.suggestedFilename()).toMatch(/\.srt$/);
+
+    // La vidéo 16:9 est encodée dans le navigateur puis téléchargée
+    const videoRow = page
+      .getByRole("listitem")
+      .filter({ hasText: "Vidéo · 16:9" });
+    const videoDownloadPromise = page.waitForEvent("download", {
+      timeout: 300_000,
+    });
+    await videoRow.getByRole("button", { name: "Télécharger" }).click();
+    const videoDownload = await videoDownloadPromise;
+    expect(videoDownload.suggestedFilename()).toMatch(/\.(mp4|webm)$/);
+    const videoPath = await videoDownload.path();
+    expect(videoPath).toBeTruthy();
+    expect(statSync(videoPath!).size).toBeGreaterThan(50_000);
 
     // Le projet créé apparaît sur le dashboard (stocké dans ce navigateur,
     // donc vérifié dans le même contexte Playwright).
