@@ -9,6 +9,7 @@ import {
 import type { ExportFormat, StoryboardScene, VideoProject } from "@/types/video";
 import {
   drawSceneFrame,
+  loadImageSources,
   precomputeTimeline,
   type Precomputed,
 } from "./video-scenes";
@@ -86,31 +87,6 @@ function fallbackScene(project: VideoProject): StoryboardScene {
     durationSeconds: 8,
     voiceOver: "",
   };
-}
-
-/** Charge les captures (data URLs ou URLs) en sources dessinables. */
-async function loadImages(
-  urls: string[]
-): Promise<Array<{ source: CanvasImageSource; aspect: number }>> {
-  const loaded = await Promise.all(
-    urls.map(
-      async (
-        url
-      ): Promise<{ source: CanvasImageSource; aspect: number } | null> => {
-        try {
-          const res = await fetch(url);
-          const blob = await res.blob();
-          const bitmap = await createImageBitmap(blob);
-          return { source: bitmap, aspect: bitmap.width / bitmap.height };
-        } catch {
-          return null;
-        }
-      }
-    )
-  );
-  return loaded.filter(
-    (x): x is { source: CanvasImageSource; aspect: number } => x !== null
-  );
 }
 
 interface EncodeContext {
@@ -293,7 +269,7 @@ export async function generateVideo(
   const ctx = canvas.getContext("2d", { alpha: false });
   if (!ctx) throw new Error("Canvas 2D indisponible dans ce navigateur.");
 
-  const images = imageUrls.length ? await loadImages(imageUrls) : [];
+  const images = imageUrls.length ? await loadImageSources(imageUrls) : [];
   const pre = precomputeTimeline(ctx, project, scenes, width, height, images);
 
   const ec: EncodeContext = {

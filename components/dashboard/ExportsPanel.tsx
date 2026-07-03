@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   buildScriptText,
   buildSrt,
@@ -10,6 +10,12 @@ import {
   projectSlug,
 } from "@/lib/exports";
 import { generateVideo } from "@/lib/video-encoder";
+import { generateVideoWithAudio } from "@/lib/video-recorder";
+import {
+  isAudioConfigured,
+  musicPromptFor,
+  voiceoverTextFor,
+} from "@/lib/audio";
 import type { ExportFormat, VideoProject } from "@/types/video";
 
 interface VideoJob {
@@ -34,20 +40,37 @@ function DownloadIcon() {
 
 /**
  * Exports réellement téléchargeables, générés dans le navigateur à partir
- * des données du projet : vidéos encodées image par image (WebCodecs),
- * sous-titres SRT et fichiers texte.
+ * des données du projet : vidéos (WebCodecs muet, ou MediaRecorder avec voix
+ * off + musique ElevenLabs), sous-titres SRT et fichiers texte.
  */
 export function ExportsPanel({ project }: { project: VideoProject }) {
   const [jobs, setJobs] = useState<Record<string, VideoJob>>({});
+  const [audioAvailable, setAudioAvailable] = useState(false);
+  const [withAudio, setWithAudio] = useState(false);
+  // Le cache dépend de l'option audio (fichiers différents).
   const cacheRef = useRef<Record<string, { blob: Blob; filename: string }>>({});
   const slug = projectSlug(project);
+
+  useEffect(() => {
+    let alive = true;
+    isAudioConfigured().then((ok) => {
+      if (!alive) return;
+      setAudioAvailable(ok);
+      setWithAudio(ok);
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   function updateJob(key: string, job: VideoJob) {
     setJobs((prev) => ({ ...prev, [key]: job }));
   }
 
   async function handleVideo(format: ExportFormat) {
-    const cached = cacheRef.current[format];
+    const audio = audioAvailable && withAudio;
+    const cacheKey = `${format}${audio ? "-audio" : ""}`;
+    const cached = cacheRef.current[cacheKey];
     if (cached) {
       downloadBlob(cached.filename, cached.blob);
       return;
@@ -56,24 +79,45 @@ export function ExportsPanel({ project }: { project: VideoProject }) {
 
     updateJob(format, { status: "working", progress: 0 });
     try {
-      const result = await generateVideo(
-        project,
-        format,
-        (progress) => updateJob(format, { status: "working", progress }),
-        project.images ?? []
-      );
-      const filename = `${slug}-${format.replace(":", "x")}.${result.extension}`;
-      cacheRef.current[format] = { blob: result.blob, filename };
+      const onProgress = (progress: number) =>
+        updateJob(format, { status: "working", progress });
+
+      let blob: Blob;
+      let extension: string;
+      if (audio) {
+        const result = await generateVideoWithAudio(
+          project,
+          format,
+          onProgress,
+          project.images ?? [],
+          {
+            voiceoverText: voiceoverTextFor(project) || undefined,
+            musicPrompt: musicPromptFor(project),
+          }
+        );
+        blob = result.blob;
+        extension = result.extension;
+      } else {
+        const result = await generateVideo(
+          project,
+          format,
+          onProgress,
+          project.images ?? []
+        );
+        blob = result.blob;
+        extension = result.extension;
+      }
+
+      const filename = `${slug}-${format.replace(":", "x")}${audio ? "-audio" : ""}.${extension}`;
+      cacheRef.current[cacheKey] = { blob, filename };
       updateJob(format, { status: "done", progress: 100 });
-      downloadBlob(filename, result.blob);
+      downloadBlob(filename, blob);
     } catch (e) {
       updateJob(format, {
         status: "error",
         progress: 0,
         error:
-          e instanceof Error
-            ? e.message
-            : "La génération a échoué. Réessayez.",
+          e instanceof Error ? e.message : "La génération a échoué. Réessayez.",
       });
     }
   }
@@ -100,12 +144,36 @@ export function ExportsPanel({ project }: { project: VideoProject }) {
     },
   ];
 
+  const anyWorking = Object.values(jobs).some((j) => j.status === "working");
+
   return (
     <>
+      {audioAvailable && (
+        <label className="mb-3 flex cursor-pointer items-center justify-between gap-3 rounded-xl border border-bronze/30 bg-[#F3E9DC]/50 px-5 py-3.5">
+          <span>
+            <span className="block text-sm font-medium text-coffee">
+              Voix off + musique (IA)
+            </span>
+            <span className="text-xs text-warm-gray">
+              Narration ElevenLabs et musique de fond. Rendu en temps réel
+              (durée de la vidéo), export WebM.
+            </span>
+          </span>
+          <input
+            type="checkbox"
+            checked={withAudio}
+            disabled={anyWorking}
+            onChange={(e) => setWithAudio(e.target.checked)}
+            className="h-4 w-4 shrink-0 accent-[#9A6A3A]"
+          />
+        </label>
+      )}
+
       <ul className="card-surface divide-y divide-[rgba(154,106,58,0.18)]">
         {project.formats.map((format) => {
           const job = jobs[format] ?? { status: "idle" as const, progress: 0 };
           const working = job.status === "working";
+          const audio = audioAvailable && withAudio;
           return (
             <li key={format} className="p-4">
               <div className="flex items-center justify-between gap-3">
@@ -113,7 +181,11 @@ export function ExportsPanel({ project }: { project: VideoProject }) {
                   <p className="text-sm font-medium text-coffee">
                     Vidéo · {format}
                   </p>
-                  <p className="text-xs text-warm-gray">{VIDEO_DETAILS[format]}</p>
+                  <p className="text-xs text-warm-gray">
+                    {audio
+                      ? `${format === "16:9" ? "1280 × 720" : format === "9:16" ? "720 × 1280" : "900 × 900"} · WebM · voix off + musique`
+                      : VIDEO_DETAILS[format]}
+                  </p>
                 </div>
                 <button
                   onClick={() => handleVideo(format)}
@@ -165,10 +237,9 @@ export function ExportsPanel({ project }: { project: VideoProject }) {
         ))}
       </ul>
       <p className="mt-3 text-[11px] leading-relaxed text-warm-gray">
-        Vidéos générées localement dans votre navigateur, sous-titres
-        incrustés, sans piste audio — la voix off arrivera avec le vrai moteur
-        de rendu. La première génération d&apos;un format prend quelques
-        dizaines de secondes.
+        {audioAvailable && withAudio
+          ? "Vidéo générée en temps réel avec voix off et musique — comptez la durée de la vidéo. Sous-titres incrustés, export WebM."
+          : "Vidéos générées localement dans votre navigateur, sous-titres incrustés. La première génération d'un format prend quelques dizaines de secondes."}
       </p>
     </>
   );

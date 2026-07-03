@@ -115,6 +115,31 @@ function wrapText(
   return lines;
 }
 
+/** Charge des captures (data URLs ou URLs) en sources dessinables. */
+export async function loadImageSources(
+  urls: string[]
+): Promise<Array<{ source: CanvasImageSource; aspect: number }>> {
+  const loaded = await Promise.all(
+    urls.map(
+      async (
+        url
+      ): Promise<{ source: CanvasImageSource; aspect: number } | null> => {
+        try {
+          const res = await fetch(url);
+          const blob = await res.blob();
+          const bitmap = await createImageBitmap(blob);
+          return { source: bitmap, aspect: bitmap.width / bitmap.height };
+        } catch {
+          return null;
+        }
+      }
+    )
+  );
+  return loaded.filter(
+    (x): x is { source: CanvasImageSource; aspect: number } => x !== null
+  );
+}
+
 export interface SceneVisual {
   scene: StoryboardScene;
   start: number;

@@ -49,6 +49,17 @@ storyboard en fichiers texte. Le rendu est un vrai montage animé (fond
 animé, typographie cinétique, mock d'interface, effet Ken Burns sur les
 captures produit, ouverture et CTA) — voir `lib/video-scenes.ts`.
 
+## Voix off + musique (ElevenLabs)
+
+Ajoute `ELEVENLABS_API_KEY` (et éventuellement `ELEVENLABS_VOICE_ID`) dans
+`.env.local` pour activer l'audio. Une option « Voix off + musique (IA) »
+apparaît alors dans les exports : la narration (TTS ElevenLabs, voix off du
+script) et une musique de fond (Eleven Music, en sourdine sous la voix) sont
+mixées dans la vidéo. Ce rendu utilise `MediaRecorder` + `captureStream`
+(muxage audio/vidéo natif, fiable Chrome/Firefox) : il se fait **en temps
+réel** (durée de la vidéo) et exporte un WebM. La clé reste côté serveur
+(`app/api/audio/*`), jamais exposée au navigateur.
+
 ## Captures produit
 
 Dépose des captures de ton SaaS à l'étape « Assets » du tunnel : elles sont
