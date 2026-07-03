@@ -65,6 +65,8 @@ export interface VideoProject {
   lastExportAt?: string;
   /** Début du rendu simulé — la progression est calculée à la lecture. */
   renderStartedAt?: string;
+  /** Captures produit (data URLs réduites) animées dans la vidéo. */
+  images?: string[];
 }
 
 export interface ProjectBrief {

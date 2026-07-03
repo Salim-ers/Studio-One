@@ -7,18 +7,24 @@ import {
   ArrayBufferTarget as WebmTarget,
 } from "webm-muxer";
 import type { ExportFormat, StoryboardScene, VideoProject } from "@/types/video";
+import {
+  drawSceneFrame,
+  precomputeTimeline,
+  type Precomputed,
+} from "./video-scenes";
 
 /**
- * Génération de la vidéo de démonstration dans le navigateur : chaque image
- * du storyboard est dessinée sur un canvas puis encodée via WebCodecs, plus
- * vite que le temps réel. Les codecs sont essayés dans l'ordre (MP4 H.264,
- * puis WebM VP8/VP9) : si le muxage échoue avec l'un — par exemple Firefox
- * sous Windows produit des B-frames H.264 réordonnées que les muxers
- * refusent — on réessaie automatiquement avec le suivant. Vidéo muette :
- * la voix off est incrustée sous forme de sous-titres.
+ * Génération de la vidéo de démonstration dans le navigateur : le rendu
+ * cinématique (lib/video-scenes.ts) est dessiné image par image sur un
+ * canvas, puis encodé via WebCodecs plus vite que le temps réel. Les codecs
+ * sont essayés dans l'ordre (MP4 H.264, puis WebM VP8/VP9) : un échec de
+ * muxage bascule automatiquement sur le suivant — Firefox produit par
+ * exemple des B-frames H.264 réordonnées que les muxers refusent. Vidéo
+ * muette : la voix off est incrustée en sous-titres (l'audio arrivera via
+ * l'intégration ElevenLabs).
  */
 
-const FPS = 24;
+const FPS = 30;
 
 export interface VideoResult {
   blob: Blob;
@@ -52,8 +58,7 @@ async function supportedCandidates(
   bitrate: number
 ): Promise<CodecCandidate[]> {
   const result: CodecCandidate[] = [];
-  for (let i = 0; i < CODEC_CANDIDATES.length; i++) {
-    const candidate = CODEC_CANDIDATES[i];
+  for (const candidate of CODEC_CANDIDATES) {
     try {
       const { supported } = await VideoEncoder.isConfigSupported({
         codec: candidate.codecString,
@@ -71,268 +76,6 @@ async function supportedCandidates(
   return result;
 }
 
-/* ── Dessin des images ─────────────────────────────────────────── */
-
-const COLORS = {
-  coffee: "#18110C",
-  bronze: "#9A6A3A",
-  bronzeDeep: "#6F4726",
-  warmGray: "#8C8178",
-  ivory: "#FFFDF8",
-  cream: "#F3E9DC",
-};
-
-const ROLE_LABELS: Record<StoryboardScene["role"], string> = {
-  intro: "Intro",
-  probleme: "Problème",
-  solution: "Solution",
-  fonctionnalites: "Fonctionnalités",
-  benefices: "Bénéfices",
-  preuve: "Preuve",
-  conclusion: "Conclusion",
-  cta: "Appel à l'action",
-};
-
-const DISPLAY_FONT = "Georgia, 'Times New Roman', serif";
-const BODY_FONT =
-  "system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif";
-
-/** Coupe en morceaux un mot insécable plus large que la colonne. */
-function breakLongWord(
-  ctx: CanvasRenderingContext2D,
-  word: string,
-  maxWidth: number
-): string[] {
-  if (ctx.measureText(word).width <= maxWidth) return [word];
-  const parts: string[] = [];
-  let current = "";
-  for (let i = 0; i < word.length; i++) {
-    const attempt = current + word[i];
-    if (ctx.measureText(attempt).width <= maxWidth || !current) {
-      current = attempt;
-    } else {
-      parts.push(current);
-      current = word[i];
-    }
-  }
-  if (current) parts.push(current);
-  return parts;
-}
-
-function wrapText(
-  ctx: CanvasRenderingContext2D,
-  text: string,
-  maxWidth: number,
-  maxLines: number
-): string[] {
-  const rawWords = text.split(/\s+/).filter(Boolean);
-  const words: string[] = [];
-  for (let i = 0; i < rawWords.length; i++) {
-    const parts = breakLongWord(ctx, rawWords[i], maxWidth);
-    for (let j = 0; j < parts.length; j++) words.push(parts[j]);
-  }
-  const lines: string[] = [];
-  let current = "";
-
-  for (let i = 0; i < words.length; i++) {
-    const attempt = current ? `${current} ${words[i]}` : words[i];
-    if (ctx.measureText(attempt).width <= maxWidth || !current) {
-      current = attempt;
-    } else {
-      lines.push(current);
-      current = words[i];
-      if (lines.length === maxLines - 1) {
-        // Dernière ligne : on remplit puis on tronque avec une ellipse.
-        let rest = current;
-        for (let j = i + 1; j < words.length; j++) rest += ` ${words[j]}`;
-        while (rest.length > 1 && ctx.measureText(`${rest}…`).width > maxWidth) {
-          rest = rest.slice(0, -1).trimEnd();
-        }
-        lines.push(rest === current ? rest : `${rest}…`);
-        return lines;
-      }
-    }
-  }
-  if (current) lines.push(current);
-  return lines;
-}
-
-interface SceneWindow {
-  scene: StoryboardScene;
-  start: number;
-  end: number;
-}
-
-function buildTimeline(scenes: StoryboardScene[]): SceneWindow[] {
-  const windows: SceneWindow[] = [];
-  let cursor = 0;
-  for (let i = 0; i < scenes.length; i++) {
-    windows.push({
-      scene: scenes[i],
-      start: cursor,
-      end: cursor + scenes[i].durationSeconds,
-    });
-    cursor += scenes[i].durationSeconds;
-  }
-  return windows;
-}
-
-function drawFrame(
-  ctx: CanvasRenderingContext2D,
-  project: VideoProject,
-  timeline: SceneWindow[],
-  totalSeconds: number,
-  time: number,
-  w: number,
-  h: number
-): void {
-  const u = Math.min(w, h) / 1080;
-  const margin = 86 * u;
-
-  // Fond dégradé ivoire → crème
-  const gradient = ctx.createLinearGradient(0, 0, w, h);
-  gradient.addColorStop(0, COLORS.ivory);
-  gradient.addColorStop(1, COLORS.cream);
-  ctx.fillStyle = gradient;
-  ctx.fillRect(0, 0, w, h);
-
-  const active =
-    timeline.find((s) => time >= s.start && time < s.end) ??
-    timeline[timeline.length - 1];
-
-  // En-tête : produit + compteur de scène
-  ctx.textBaseline = "top";
-  ctx.fillStyle = COLORS.bronze;
-  ctx.font = `600 ${Math.round(26 * u)}px ${BODY_FONT}`;
-  ctx.textAlign = "left";
-  ctx.fillText(project.productName.toUpperCase(), margin, margin * 0.55);
-  if (active) {
-    ctx.textAlign = "right";
-    ctx.fillStyle = COLORS.warmGray;
-    ctx.fillText(
-      `SCÈNE ${active.scene.order}/${timeline.length}`,
-      w - margin,
-      margin * 0.55
-    );
-  }
-
-  if (active) {
-    // Fondu d'apparition du contenu de scène
-    const local = time - active.start;
-    const fade = Math.max(0.05, Math.min(1, local / 0.5));
-    ctx.globalAlpha = fade;
-
-    const contentTop = h * (h > w ? 0.24 : 0.26);
-    ctx.textAlign = "left";
-
-    // Rôle de la scène
-    ctx.fillStyle = COLORS.bronze;
-    ctx.font = `700 ${Math.round(30 * u)}px ${BODY_FONT}`;
-    ctx.fillText(
-      ROLE_LABELS[active.scene.role].toUpperCase(),
-      margin,
-      contentTop
-    );
-
-    // Titre
-    ctx.fillStyle = COLORS.coffee;
-    ctx.font = `600 ${Math.round(72 * u)}px ${DISPLAY_FONT}`;
-    const titleLines = wrapText(ctx, active.scene.title, w - margin * 2, 2);
-    let y = contentTop + 56 * u;
-    for (let i = 0; i < titleLines.length; i++) {
-      ctx.fillText(titleLines[i], margin, y);
-      y += 84 * u;
-    }
-
-    // Description
-    ctx.fillStyle = COLORS.warmGray;
-    ctx.font = `400 ${Math.round(34 * u)}px ${BODY_FONT}`;
-    const descLines = wrapText(ctx, active.scene.description, w - margin * 2, 4);
-    y += 16 * u;
-    for (let i = 0; i < descLines.length; i++) {
-      ctx.fillText(descLines[i], margin, y);
-      y += 48 * u;
-    }
-
-    // Sous-titre (voix off incrustée)
-    if (active.scene.voiceOver.trim()) {
-      ctx.font = `500 ${Math.round(32 * u)}px ${BODY_FONT}`;
-      const subLines = wrapText(
-        ctx,
-        active.scene.voiceOver.trim(),
-        w - margin * 3,
-        3
-      );
-      const lineHeight = 46 * u;
-      const padY = 28 * u;
-      const boxHeight = subLines.length * lineHeight + padY * 2 - (lineHeight - 36 * u);
-      const boxBottom = h - 120 * u;
-      const boxTop = boxBottom - boxHeight;
-
-      ctx.globalAlpha = fade * 0.92;
-      ctx.fillStyle = COLORS.ivory;
-      ctx.strokeStyle = "rgba(154,106,58,0.25)";
-      ctx.lineWidth = 2 * u;
-      ctx.beginPath();
-      const bx = margin;
-      const bw = w - margin * 2;
-      const r = 18 * u;
-      ctx.moveTo(bx + r, boxTop);
-      ctx.arcTo(bx + bw, boxTop, bx + bw, boxTop + boxHeight, r);
-      ctx.arcTo(bx + bw, boxTop + boxHeight, bx, boxTop + boxHeight, r);
-      ctx.arcTo(bx, boxTop + boxHeight, bx, boxTop, r);
-      ctx.arcTo(bx, boxTop, bx + bw, boxTop, r);
-      ctx.closePath();
-      ctx.fill();
-      ctx.stroke();
-
-      ctx.globalAlpha = fade;
-      ctx.fillStyle = COLORS.coffee;
-      ctx.textAlign = "center";
-      let sy = boxTop + padY;
-      for (let i = 0; i < subLines.length; i++) {
-        ctx.fillText(subLines[i], w / 2, sy);
-        sy += lineHeight;
-      }
-    }
-
-    ctx.globalAlpha = 1;
-  }
-
-  // Règle pellicule : graduations au-dessus de la barre de progression
-  ctx.strokeStyle = "rgba(154,106,58,0.35)";
-  ctx.lineWidth = Math.max(1, 2 * u);
-  const tickY = h - 64 * u;
-  for (let x = margin; x <= w - margin; x += 24 * u) {
-    const major = Math.round((x - margin) / (24 * u)) % 5 === 0;
-    ctx.beginPath();
-    ctx.moveTo(x, tickY);
-    ctx.lineTo(x, tickY - (major ? 16 : 9) * u);
-    ctx.stroke();
-  }
-
-  // Barre de progression globale
-  const barY = h - 44 * u;
-  ctx.fillStyle = "rgba(154,106,58,0.18)";
-  ctx.fillRect(margin, barY, w - margin * 2, 6 * u);
-  ctx.fillStyle = COLORS.bronze;
-  ctx.fillRect(
-    margin,
-    barY,
-    (w - margin * 2) * Math.min(1, time / totalSeconds),
-    6 * u
-  );
-
-  // Signature
-  ctx.fillStyle = COLORS.warmGray;
-  ctx.font = `400 ${Math.round(20 * u)}px ${BODY_FONT}`;
-  ctx.textAlign = "right";
-  ctx.fillText("Studio One — démo générée", w - margin, h - 30 * u);
-  ctx.textAlign = "left";
-}
-
-/* ── Encodage ──────────────────────────────────────────────────── */
-
 function fallbackScene(project: VideoProject): StoryboardScene {
   return {
     id: "sc-brand",
@@ -345,10 +88,33 @@ function fallbackScene(project: VideoProject): StoryboardScene {
   };
 }
 
+/** Charge les captures (data URLs ou URLs) en sources dessinables. */
+async function loadImages(
+  urls: string[]
+): Promise<Array<{ source: CanvasImageSource; aspect: number }>> {
+  const loaded = await Promise.all(
+    urls.map(
+      async (
+        url
+      ): Promise<{ source: CanvasImageSource; aspect: number } | null> => {
+        try {
+          const res = await fetch(url);
+          const blob = await res.blob();
+          const bitmap = await createImageBitmap(blob);
+          return { source: bitmap, aspect: bitmap.width / bitmap.height };
+        } catch {
+          return null;
+        }
+      }
+    )
+  );
+  return loaded.filter(
+    (x): x is { source: CanvasImageSource; aspect: number } => x !== null
+  );
+}
+
 interface EncodeContext {
-  project: VideoProject;
-  timeline: SceneWindow[];
-  totalSeconds: number;
+  pre: Precomputed;
   totalFrames: number;
   ctx: CanvasRenderingContext2D;
   canvas: HTMLCanvasElement;
@@ -360,9 +126,9 @@ interface EncodeContext {
 
 async function encodeWithCandidate(
   candidate: CodecCandidate,
-  encodeCtx: EncodeContext
+  ec: EncodeContext
 ): Promise<VideoResult> {
-  const { project, timeline, totalSeconds, totalFrames, ctx, canvas, width, height, bitrate, onProgress } = encodeCtx;
+  const { pre, totalFrames, ctx, canvas, width, height, bitrate, onProgress } = ec;
 
   let addChunk: (
     chunk: EncodedVideoChunk,
@@ -404,7 +170,6 @@ async function encodeWithCandidate(
 
   const errorRef: { current: Error | null } = { current: null };
   const recordError = (e: unknown) => {
-    // On conserve la première erreur : c'est la cause racine.
     if (!errorRef.current) {
       errorRef.current = e instanceof Error ? e : new Error(String(e));
     }
@@ -413,8 +178,7 @@ async function encodeWithCandidate(
     output: (chunk, meta) => {
       try {
         // Firefox : decoderConfig absent après le premier chunk, et
-        // colorSpace aux membres nuls qui fait planter les muxers — on ne
-        // transmet que l'essentiel (description codec incluse).
+        // colorSpace aux membres nuls qui fait planter les muxers.
         const decoderConfig = meta && meta.decoderConfig;
         addChunk(
           chunk,
@@ -435,8 +199,6 @@ async function encodeWithCandidate(
     height,
     bitrate,
     framerate: FPS,
-    // realtime limite le réordonnancement de frames (B-frames) ; certains
-    // encodeurs l'ignorent — l'essai de repli couvre alors ce cas.
     latencyMode: "realtime",
     ...(candidate.kind === "mp4" ? { avc: { format: "avc" as const } } : {}),
   });
@@ -446,7 +208,7 @@ async function encodeWithCandidate(
   for (let i = 0; i < totalFrames; i++) {
     if (errorRef.current) break;
 
-    drawFrame(ctx, project, timeline, totalSeconds, i / FPS, width, height);
+    drawSceneFrame(ctx, pre, i / FPS, width, height);
     const frame = new VideoFrame(canvas, {
       timestamp: i * frameDuration,
       duration: frameDuration,
@@ -454,8 +216,6 @@ async function encodeWithCandidate(
     encoder.encode(frame, { keyFrame: i % (FPS * 2) === 0 });
     frame.close();
 
-    // Régule la file de l'encodeur ; borné pour ne jamais bloquer si
-    // l'encodeur plante ("dequeue" ne viendrait alors jamais).
     if (encoder.encodeQueueSize > 8) {
       await new Promise<void>((resolve) => {
         const timer = setTimeout(resolve, 500);
@@ -504,7 +264,8 @@ async function encodeWithCandidate(
 export async function generateVideo(
   project: VideoProject,
   format: ExportFormat,
-  onProgress: (percent: number) => void
+  onProgress: (percent: number) => void,
+  imageUrls: string[] = []
 ): Promise<VideoResult> {
   if (typeof VideoEncoder === "undefined") {
     throw new Error(
@@ -513,10 +274,10 @@ export async function generateVideo(
   }
 
   const { width, height } = FORMAT_DIMENSIONS[format];
-  const bitrate = format === "1:1" ? 6_000_000 : 8_000_000;
-  const scenes = project.scenes.length > 0 ? project.scenes : [fallbackScene(project)];
-  const timeline = buildTimeline(scenes);
-  const totalSeconds = timeline[timeline.length - 1].end;
+  const bitrate = format === "1:1" ? 7_000_000 : 9_000_000;
+  const scenes =
+    project.scenes.length > 0 ? project.scenes : [fallbackScene(project)];
+  const totalSeconds = scenes.reduce((acc, s) => acc + s.durationSeconds, 0);
   const totalFrames = Math.max(FPS, Math.round(totalSeconds * FPS));
 
   const candidates = await supportedCandidates(width, height, bitrate);
@@ -532,18 +293,26 @@ export async function generateVideo(
   const ctx = canvas.getContext("2d", { alpha: false });
   if (!ctx) throw new Error("Canvas 2D indisponible dans ce navigateur.");
 
-  const encodeCtx: EncodeContext = {
-    project, timeline, totalSeconds, totalFrames,
-    ctx, canvas, width, height, bitrate, onProgress,
+  const images = imageUrls.length ? await loadImages(imageUrls) : [];
+  const pre = precomputeTimeline(ctx, project, scenes, width, height, images);
+
+  const ec: EncodeContext = {
+    pre,
+    totalFrames,
+    ctx,
+    canvas,
+    width,
+    height,
+    bitrate,
+    onProgress,
   };
 
   let lastError: Error | null = null;
-  for (let i = 0; i < candidates.length; i++) {
+  for (const candidate of candidates) {
     try {
-      return await encodeWithCandidate(candidates[i], encodeCtx);
+      return await encodeWithCandidate(candidate, ec);
     } catch (e) {
-      // Codec suivant : ex. H.264 de Firefox/Windows produit des B-frames
-      // réordonnées que le muxer refuse — le WebM VP8 prend le relais.
+      // Codec suivant : ex. H.264 de Firefox/Windows réordonne les frames.
       lastError = e instanceof Error ? e : new Error(String(e));
       onProgress(0);
     }

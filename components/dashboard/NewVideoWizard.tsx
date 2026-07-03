@@ -85,6 +85,7 @@ interface WizardState {
   narrationStyle: "voix-off" | "demonstration" | "temoignage";
   scriptLength: "concis" | "standard" | "detaille";
   subtitles: boolean;
+  screenshots: string[];
 }
 
 const initialState: WizardState = {
@@ -105,6 +106,7 @@ const initialState: WizardState = {
   narrationStyle: "voix-off",
   scriptLength: "standard",
   subtitles: true,
+  screenshots: [],
 };
 
 /* ── Génération simulée ────────────────────────────────────────── */
@@ -228,6 +230,7 @@ export function NewVideoWizard() {
       cta: state.cta,
       scriptText: state.scriptText,
       subtitles: state.subtitles,
+      images: state.screenshots,
     });
 
     if (!saveLocalProject(project)) {
@@ -490,8 +493,9 @@ export function NewVideoWizard() {
                 </Field>
                 <UploadDropzone
                   label="Captures d'écran"
-                  hint="PNG ou JPG, en haute résolution — elles seront affichées en 4K."
+                  hint="PNG ou JPG — elles seront animées (zoom, panoramique) dans la vidéo."
                   accept="image/*"
+                  onImagesChange={(urls) => update("screenshots", urls)}
                 />
                 <UploadDropzone
                   label="Vidéos courtes (optionnel)"

@@ -56,8 +56,11 @@ export function ExportsPanel({ project }: { project: VideoProject }) {
 
     updateJob(format, { status: "working", progress: 0 });
     try {
-      const result = await generateVideo(project, format, (progress) =>
-        updateJob(format, { status: "working", progress })
+      const result = await generateVideo(
+        project,
+        format,
+        (progress) => updateJob(format, { status: "working", progress }),
+        project.images ?? []
       );
       const filename = `${slug}-${format.replace(":", "x")}.${result.extension}`;
       cacheRef.current[format] = { blob: result.blob, filename };

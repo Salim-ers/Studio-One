@@ -8,20 +8,72 @@ interface UploadDropzoneProps {
   hint: string;
   accept?: string;
   multiple?: boolean;
+  /** Mode image : réduit et remonte les data URLs pour les animer dans la vidéo. */
+  onImagesChange?: (dataUrls: string[]) => void;
+  maxImages?: number;
+}
+
+/** Réduit une image (max 1400 px) en JPEG data URL, pour tenir dans le stockage. */
+async function downscaleToDataUrl(file: File, maxDim = 1400): Promise<string> {
+  const bitmap = await createImageBitmap(file);
+  const scale = Math.min(1, maxDim / Math.max(bitmap.width, bitmap.height));
+  const w = Math.max(1, Math.round(bitmap.width * scale));
+  const h = Math.max(1, Math.round(bitmap.height * scale));
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return "";
+  ctx.drawImage(bitmap, 0, 0, w, h);
+  bitmap.close();
+  return canvas.toDataURL("image/jpeg", 0.82);
 }
 
 /**
  * Zone d'upload élégante : drag & drop + sélection de fichiers.
- * Les fichiers restent côté client (prêt à brancher sur un stockage).
+ * En mode image, les fichiers sont réduits en data URLs et remontés.
  */
-export function UploadDropzone({ label, hint, accept, multiple = true }: UploadDropzoneProps) {
+export function UploadDropzone({
+  label,
+  hint,
+  accept,
+  multiple = true,
+  onImagesChange,
+  maxImages = 5,
+}: UploadDropzoneProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
   const [files, setFiles] = useState<string[]>([]);
+  const [images, setImages] = useState<string[]>([]);
 
-  function addFiles(list: FileList | null) {
+  async function addFiles(list: FileList | null) {
     if (!list) return;
-    setFiles((prev) => [...prev, ...Array.from(list).map((f) => f.name)]);
+    const incoming = Array.from(list);
+    setFiles((prev) => [...prev, ...incoming.map((f) => f.name)]);
+
+    if (!onImagesChange) return;
+    const imageFiles = incoming.filter((f) => f.type.startsWith("image/"));
+    const dataUrls = (
+      await Promise.all(
+        imageFiles.map((f) => downscaleToDataUrl(f).catch(() => ""))
+      )
+    ).filter(Boolean);
+    setImages((prev) => {
+      const next = [...prev, ...dataUrls].slice(0, maxImages);
+      onImagesChange(next);
+      return next;
+    });
+  }
+
+  function removeAt(i: number) {
+    setFiles((prev) => prev.filter((_, j) => j !== i));
+    if (onImagesChange) {
+      setImages((prev) => {
+        const next = prev.filter((_, j) => j !== i);
+        onImagesChange(next);
+        return next;
+      });
+    }
   }
 
   return (
@@ -82,7 +134,7 @@ export function UploadDropzone({ label, hint, accept, multiple = true }: UploadD
               </span>
               <button
                 type="button"
-                onClick={() => setFiles((prev) => prev.filter((_, j) => j !== i))}
+                onClick={() => removeAt(i)}
                 className="ml-3 text-xs text-warm-gray transition-colors hover:text-red-700"
                 aria-label={`Retirer ${name}`}
               >
@@ -91,6 +143,14 @@ export function UploadDropzone({ label, hint, accept, multiple = true }: UploadD
             </li>
           ))}
         </ul>
+      )}
+
+      {onImagesChange && images.length > 0 && (
+        <p className="mt-2 text-xs text-bronze-deep">
+          {images.length} capture{images.length > 1 ? "s" : ""} prête
+          {images.length > 1 ? "s" : ""} à être animée
+          {images.length > 1 ? "s" : ""} dans la vidéo.
+        </p>
       )}
     </div>
   );

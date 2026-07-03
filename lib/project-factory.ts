@@ -28,6 +28,7 @@ export interface CreateProjectInput {
   cta?: string;
   scriptText: string;
   subtitles?: boolean;
+  images?: string[];
 }
 
 const sceneTemplates: Array<{
@@ -168,5 +169,6 @@ export function buildProject(input: CreateProjectInput): VideoProject {
     createdAt: now,
     updatedAt: now,
     renderStartedAt: now,
+    images: input.images && input.images.length ? input.images : undefined,
   };
 }

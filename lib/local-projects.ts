@@ -24,12 +24,25 @@ export function loadLocalProjects(): VideoProject[] {
 
 function persist(projects: VideoProject[]): boolean {
   if (typeof window === "undefined") return false;
-  try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(projects));
-    return true;
-  } catch {
-    return false;
+  // Les captures (data URLs) peuvent dépasser le quota localStorage : en cas
+  // d'échec, on retire d'abord les images des plus anciens projets, puis les
+  // projets eux-mêmes, jusqu'à ce que ça tienne — sans jamais perdre le plus récent.
+  const attempts: VideoProject[][] = [projects];
+  attempts.push(
+    projects.map((p, i) => (i === 0 ? p : { ...p, images: undefined }))
+  );
+  for (let keep = projects.length; keep >= 1; keep--) {
+    attempts.push(projects.slice(0, keep).map((p, i) => (i === 0 ? p : { ...p, images: undefined })));
   }
+  for (const attempt of attempts) {
+    try {
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(attempt));
+      return true;
+    } catch {
+      // essai suivant, plus léger
+    }
+  }
+  return false;
 }
 
 export function saveLocalProject(project: VideoProject): boolean {
