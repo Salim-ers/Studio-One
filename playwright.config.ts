@@ -22,6 +22,12 @@ export default defineConfig({
       // n'a pas les codecs propriétaires et crashe sur l'encodage WebCodecs.
       use: { ...devices["Desktop Chrome"], channel: "chrome" },
     },
+    {
+      name: "firefox",
+      // Firefox émet des métadonnées d'encodage différentes de Chrome
+      // (decoderConfig absent après le premier chunk) — à tester aussi.
+      use: { ...devices["Desktop Firefox"] },
+    },
   ],
   webServer: {
     command: "npm run dev",

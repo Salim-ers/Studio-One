@@ -11,9 +11,11 @@ import type { ExportFormat, StoryboardScene, VideoProject } from "@/types/video"
 /**
  * Génération de la vidéo de démonstration dans le navigateur : chaque image
  * du storyboard est dessinée sur un canvas puis encodée via WebCodecs, plus
- * vite que le temps réel. MP4 (H.264) en priorité, repli WebM (VP8/VP9)
- * selon les codecs disponibles. Vidéo muette : la voix off est incrustée
- * sous forme de sous-titres.
+ * vite que le temps réel. Les codecs sont essayés dans l'ordre (MP4 H.264,
+ * puis WebM VP8/VP9) : si le muxage échoue avec l'un — par exemple Firefox
+ * sous Windows produit des B-frames H.264 réordonnées que les muxers
+ * refusent — on réessaie automatiquement avec le suivant. Vidéo muette :
+ * la voix off est incrustée sous forme de sous-titres.
  */
 
 const FPS = 24;
@@ -44,11 +46,12 @@ const CODEC_CANDIDATES: CodecCandidate[] = [
   { kind: "webm", codecString: "vp09.00.40.08", webmCodec: "V_VP9" },
 ];
 
-async function pickCodec(
+async function supportedCandidates(
   width: number,
   height: number,
   bitrate: number
-): Promise<CodecCandidate> {
+): Promise<CodecCandidate[]> {
+  const result: CodecCandidate[] = [];
   for (let i = 0; i < CODEC_CANDIDATES.length; i++) {
     const candidate = CODEC_CANDIDATES[i];
     try {
@@ -58,15 +61,14 @@ async function pickCodec(
         height,
         bitrate,
         framerate: FPS,
+        latencyMode: "realtime",
       });
-      if (supported) return candidate;
+      if (supported) result.push(candidate);
     } catch {
       // Codec inconnu de ce navigateur : on essaie le suivant.
     }
   }
-  throw new Error(
-    "Aucun codec vidéo compatible trouvé dans ce navigateur. Essayez Chrome ou Edge récent."
-  );
+  return result;
 }
 
 /* ── Dessin des images ─────────────────────────────────────────── */
@@ -343,31 +345,24 @@ function fallbackScene(project: VideoProject): StoryboardScene {
   };
 }
 
-export async function generateVideo(
-  project: VideoProject,
-  format: ExportFormat,
-  onProgress: (percent: number) => void
+interface EncodeContext {
+  project: VideoProject;
+  timeline: SceneWindow[];
+  totalSeconds: number;
+  totalFrames: number;
+  ctx: CanvasRenderingContext2D;
+  canvas: HTMLCanvasElement;
+  width: number;
+  height: number;
+  bitrate: number;
+  onProgress: (percent: number) => void;
+}
+
+async function encodeWithCandidate(
+  candidate: CodecCandidate,
+  encodeCtx: EncodeContext
 ): Promise<VideoResult> {
-  if (typeof VideoEncoder === "undefined") {
-    throw new Error(
-      "Votre navigateur ne supporte pas l'encodage vidéo (WebCodecs). Utilisez Chrome, Edge ou un navigateur récent."
-    );
-  }
-
-  const { width, height } = FORMAT_DIMENSIONS[format];
-  const bitrate = format === "1:1" ? 6_000_000 : 8_000_000;
-  const scenes = project.scenes.length > 0 ? project.scenes : [fallbackScene(project)];
-  const timeline = buildTimeline(scenes);
-  const totalSeconds = timeline[timeline.length - 1].end;
-  const totalFrames = Math.max(FPS, Math.round(totalSeconds * FPS));
-
-  const candidate = await pickCodec(width, height, bitrate);
-
-  const canvas = document.createElement("canvas");
-  canvas.width = width;
-  canvas.height = height;
-  const ctx = canvas.getContext("2d", { alpha: false });
-  if (!ctx) throw new Error("Canvas 2D indisponible dans ce navigateur.");
+  const { project, timeline, totalSeconds, totalFrames, ctx, canvas, width, height, bitrate, onProgress } = encodeCtx;
 
   let addChunk: (
     chunk: EncodedVideoChunk,
@@ -381,6 +376,7 @@ export async function generateVideo(
       target,
       video: { codec: "avc", width, height },
       fastStart: "in-memory",
+      firstTimestampBehavior: "offset",
     });
     addChunk = (chunk, meta) => muxer.addVideoChunk(chunk, meta);
     finalize = () => {
@@ -397,6 +393,7 @@ export async function generateVideo(
         height,
         frameRate: FPS,
       },
+      firstTimestampBehavior: "offset",
     });
     addChunk = (chunk, meta) => muxer.addVideoChunk(chunk, meta);
     finalize = () => {
@@ -406,11 +403,30 @@ export async function generateVideo(
   }
 
   const errorRef: { current: Error | null } = { current: null };
-  const encoder = new VideoEncoder({
-    output: (chunk, meta) => addChunk(chunk, meta),
-    error: (e) => {
+  const recordError = (e: unknown) => {
+    // On conserve la première erreur : c'est la cause racine.
+    if (!errorRef.current) {
       errorRef.current = e instanceof Error ? e : new Error(String(e));
+    }
+  };
+  const encoder = new VideoEncoder({
+    output: (chunk, meta) => {
+      try {
+        // Firefox : decoderConfig absent après le premier chunk, et
+        // colorSpace aux membres nuls qui fait planter les muxers — on ne
+        // transmet que l'essentiel (description codec incluse).
+        const decoderConfig = meta && meta.decoderConfig;
+        addChunk(
+          chunk,
+          decoderConfig
+            ? { decoderConfig: { ...decoderConfig, colorSpace: undefined } }
+            : undefined
+        );
+      } catch (e) {
+        recordError(e);
+      }
     },
+    error: recordError,
   });
 
   encoder.configure({
@@ -419,6 +435,9 @@ export async function generateVideo(
     height,
     bitrate,
     framerate: FPS,
+    // realtime limite le réordonnancement de frames (B-frames) ; certains
+    // encodeurs l'ignorent — l'essai de repli couvre alors ce cas.
+    latencyMode: "realtime",
     ...(candidate.kind === "mp4" ? { avc: { format: "avc" as const } } : {}),
   });
 
@@ -435,9 +454,8 @@ export async function generateVideo(
     encoder.encode(frame, { keyFrame: i % (FPS * 2) === 0 });
     frame.close();
 
-    // Régule la file de l'encodeur et laisse respirer l'interface.
-    // Le timeout évite un blocage si l'encodeur plante : "dequeue" ne
-    // serait alors jamais émis, et la boucle doit revoir errorRef.
+    // Régule la file de l'encodeur ; borné pour ne jamais bloquer si
+    // l'encodeur plante ("dequeue" ne viendrait alors jamais).
     if (encoder.encodeQueueSize > 8) {
       await new Promise<void>((resolve) => {
         const timer = setTimeout(resolve, 500);
@@ -457,15 +475,19 @@ export async function generateVideo(
     }
   }
 
-  if (errorRef.current) {
+  if (!errorRef.current) {
     try {
-      encoder.close();
-    } catch {}
-    throw errorRef.current;
+      await encoder.flush();
+    } catch (e) {
+      recordError(e);
+    }
   }
+  try {
+    encoder.close();
+  } catch {}
 
-  await encoder.flush();
-  encoder.close();
+  if (errorRef.current) throw errorRef.current;
+
   const buffer = finalize();
   onProgress(100);
 
@@ -477,4 +499,54 @@ export async function generateVideo(
     width,
     height,
   };
+}
+
+export async function generateVideo(
+  project: VideoProject,
+  format: ExportFormat,
+  onProgress: (percent: number) => void
+): Promise<VideoResult> {
+  if (typeof VideoEncoder === "undefined") {
+    throw new Error(
+      "Votre navigateur ne supporte pas l'encodage vidéo (WebCodecs). Utilisez Chrome, Edge ou un navigateur récent."
+    );
+  }
+
+  const { width, height } = FORMAT_DIMENSIONS[format];
+  const bitrate = format === "1:1" ? 6_000_000 : 8_000_000;
+  const scenes = project.scenes.length > 0 ? project.scenes : [fallbackScene(project)];
+  const timeline = buildTimeline(scenes);
+  const totalSeconds = timeline[timeline.length - 1].end;
+  const totalFrames = Math.max(FPS, Math.round(totalSeconds * FPS));
+
+  const candidates = await supportedCandidates(width, height, bitrate);
+  if (candidates.length === 0) {
+    throw new Error(
+      "Aucun codec vidéo compatible trouvé dans ce navigateur. Essayez Chrome ou Edge récent."
+    );
+  }
+
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d", { alpha: false });
+  if (!ctx) throw new Error("Canvas 2D indisponible dans ce navigateur.");
+
+  const encodeCtx: EncodeContext = {
+    project, timeline, totalSeconds, totalFrames,
+    ctx, canvas, width, height, bitrate, onProgress,
+  };
+
+  let lastError: Error | null = null;
+  for (let i = 0; i < candidates.length; i++) {
+    try {
+      return await encodeWithCandidate(candidates[i], encodeCtx);
+    } catch (e) {
+      // Codec suivant : ex. H.264 de Firefox/Windows produit des B-frames
+      // réordonnées que le muxer refuse — le WebM VP8 prend le relais.
+      lastError = e instanceof Error ? e : new Error(String(e));
+      onProgress(0);
+    }
+  }
+  throw lastError ?? new Error("La génération vidéo a échoué.");
 }
