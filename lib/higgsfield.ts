@@ -29,10 +29,13 @@ export function ambiancePromptFor(input: {
   return `Cinematic premium establishing footage evoking the world of ${universe}.${extra} Warm cinematic lighting, shallow depth of field, elegant, no text, ad-quality.`;
 }
 
-export async function generateHiggsfieldClip(input: {
-  prompt: string;
-  aspectRatio?: string;
-}): Promise<{ videoUrl: string; imageUrl?: string }> {
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+export async function generateHiggsfieldClip(
+  input: { prompt: string; motion?: string; aspectRatio?: string },
+  onStatus?: (label: string) => void
+): Promise<{ videoUrl: string; imageUrl?: string }> {
+  onStatus?.("Génération de l'image…");
   const res = await fetch("/api/higgsfield/clip", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -50,7 +53,38 @@ export async function generateHiggsfieldClip(input: {
     }
     throw new Error(message);
   }
-  return (await res.json()) as { videoUrl: string; imageUrl?: string };
+
+  const first = (await res.json()) as {
+    videoUrl?: string;
+    imageUrl?: string;
+    jobSetId?: string;
+  };
+  if (first.videoUrl) return { videoUrl: first.videoUrl, imageUrl: first.imageUrl };
+  if (!first.jobSetId) throw new Error("Aucun job vidéo à suivre.");
+
+  // Poll de l'état du job vidéo (jusqu'à ~6 min).
+  onStatus?.("Animation de la vidéo…");
+  const deadline = Date.now() + 6 * 60 * 1000;
+  while (Date.now() < deadline) {
+    await sleep(4000);
+    try {
+      const jr = await fetch(
+        `/api/higgsfield/job?id=${encodeURIComponent(first.jobSetId)}`,
+        { cache: "no-store" }
+      );
+      const jd = (await jr.json()) as { status?: string; videoUrl?: string };
+      if (jd.status === "completed" && jd.videoUrl) {
+        return { videoUrl: jd.videoUrl, imageUrl: first.imageUrl };
+      }
+      if (jd.status === "failed") throw new Error("La génération vidéo a échoué.");
+      if (jd.status === "nsfw")
+        throw new Error("Vidéo refusée par la modération. Reformule le thème.");
+    } catch (e) {
+      if (e instanceof Error && /échoué|modération/.test(e.message)) throw e;
+      // erreur réseau transitoire : on retente
+    }
+  }
+  throw new Error("Délai dépassé pour la génération vidéo.");
 }
 
 export function projectClipUrl(project: VideoProject): string | undefined {

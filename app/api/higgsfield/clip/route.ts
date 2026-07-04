@@ -2,20 +2,23 @@ import { NextResponse } from "next/server";
 import { resolveHiggsfieldCredentials } from "@/lib/higgsfield-server";
 
 /**
- * Génère un clip d'ambiance IA thématique via Higgsfield : texte → image
- * (flux) puis image → vidéo (dop). Deux jobs asynchrones ; la route bloque
- * jusqu'au résultat, d'où maxDuration élevé (nécessite un plan Vercel qui
- * autorise les fonctions longues). Les clés restent côté serveur.
+ * Lance un clip d'ambiance IA : texte → image (flux, rapide), puis SOUMET
+ * image → vidéo (dop) sans attendre. Renvoie l'URL image + l'id du job vidéo.
+ * Le client poll ensuite /api/higgsfield/job jusqu'à obtenir la vidéo — ça
+ * garde cette route courte (robuste aux limites serverless). Clés côté serveur.
  */
 
 export const runtime = "nodejs";
-export const maxDuration = 300;
+export const maxDuration = 60;
 
-const ASPECTS: Record<string, string> = {
-  "16:9": "16:9",
-  "9:16": "9:16",
-  "1:1": "1:1",
-};
+const ASPECTS: Record<string, string> = { "16:9": "16:9", "9:16": "9:16", "1:1": "1:1" };
+
+const resultUrl = (job: any): string | undefined =>
+  job?.jobs?.[0]?.results?.raw?.url ??
+  job?.jobs?.[0]?.results?.min?.url ??
+  job?.results?.raw?.url ??
+  job?.video?.url ??
+  job?.images?.[0]?.url;
 
 export async function POST(request: Request) {
   const credentials = resolveHiggsfieldCredentials();
@@ -35,7 +38,7 @@ export async function POST(request: Request) {
 
   const prompt =
     String(body.prompt ?? "").trim() ||
-    "Cinematic premium establishing shot, warm lighting, shallow depth of field, elegant, no text";
+    "Cinematic premium establishing footage, warm lighting, shallow depth of field, elegant, no text";
   const motion =
     String(body.motion ?? "").trim() ||
     "Slow cinematic camera movement, subtle parallax, premium ad feel";
@@ -54,24 +57,13 @@ export async function POST(request: Request) {
     );
   }
 
-  // Récupère l'URL du premier résultat d'un JobSet, quelle que soit la forme.
-  const resultUrl = (job: any): string | undefined =>
-    job?.jobs?.[0]?.results?.raw?.url ??
-    job?.jobs?.[0]?.results?.min?.url ??
-    job?.results?.raw?.url ??
-    job?.video?.url ??
-    job?.images?.[0]?.url;
-
-  // Étape 1 — texte → image (flux)
+  // Étape 1 — texte → image (flux, format v2 : le SDK poll jusqu'au bout)
   let imageUrl: string | undefined;
   try {
-    const imgJob = await higgsfield.subscribe(
-      "flux-pro/kontext/max/text-to-image",
-      {
-        input: { aspect_ratio, prompt, safety_tolerance: 2, seed },
-        withPolling: true,
-      }
-    );
+    const imgJob = await higgsfield.subscribe("flux-pro/kontext/max/text-to-image", {
+      input: { aspect_ratio, prompt, safety_tolerance: 2, seed },
+      withPolling: true,
+    });
     const st = String(imgJob?.status ?? "");
     if (st === "nsfw" || imgJob?.isNsfw) {
       return NextResponse.json(
@@ -79,22 +71,10 @@ export async function POST(request: Request) {
         { status: 422 }
       );
     }
-    if (st === "failed") {
-      return NextResponse.json(
-        { error: "La génération d'image a échoué.", step: "image" },
-        { status: 502 }
-      );
-    }
     imageUrl = resultUrl(imgJob);
     if (!imageUrl) {
       return NextResponse.json(
-        {
-          error: "Aucune URL d'image renvoyée.",
-          step: "image",
-          status: st,
-          jobs: Array.isArray(imgJob?.jobs) ? imgJob.jobs.length : 0,
-          keys: imgJob ? Object.keys(imgJob).slice(0, 12) : [],
-        },
+        { error: "Aucune URL d'image renvoyée.", step: "image", status: st },
         { status: 502 }
       );
     }
@@ -105,10 +85,9 @@ export async function POST(request: Request) {
     );
   }
 
-  // Étape 2 — image → vidéo (dop)
+  // Étape 2 — SOUMET image → vidéo (dop) sans attendre. L'endpoint dop exige
+  // un wrapper `params` ; il renvoie un jobset (id + jobs) à poller.
   try {
-    // Le SDK envoie l'input à plat, mais l'endpoint dop exige un wrapper
-    // `params` (contrairement à flux). On pré-emballe donc l'input.
     const vidJob = await higgsfield.subscribe("/v1/image2video/dop", {
       input: {
         params: {
@@ -117,33 +96,22 @@ export async function POST(request: Request) {
           input_images: [{ type: "image_url", image_url: imageUrl }],
         },
       },
-      withPolling: true,
+      withPolling: false,
     });
-    const st = String(vidJob?.status ?? "");
-    if (st === "failed") {
+    const jobSetId = vidJob?.id;
+    // Parfois la vidéo est déjà prête (peu probable) :
+    const immediate = resultUrl(vidJob);
+    if (immediate) return NextResponse.json({ imageUrl, videoUrl: immediate });
+    if (!jobSetId) {
       return NextResponse.json(
-        { error: "La génération vidéo a échoué.", step: "video", imageUrl },
+        { error: "Soumission vidéo sans identifiant.", step: "video", imageUrl, keys: vidJob ? Object.keys(vidJob) : [] },
         { status: 502 }
       );
     }
-    const videoUrl = resultUrl(vidJob);
-    if (!videoUrl) {
-      return NextResponse.json(
-        {
-          error: "Aucune URL de vidéo renvoyée.",
-          step: "video",
-          status: st,
-          jobs: Array.isArray(vidJob?.jobs) ? vidJob.jobs.length : 0,
-          keys: vidJob ? Object.keys(vidJob).slice(0, 12) : [],
-          imageUrl,
-        },
-        { status: 502 }
-      );
-    }
-    return NextResponse.json({ videoUrl, imageUrl });
+    return NextResponse.json({ imageUrl, jobSetId });
   } catch (e) {
     return NextResponse.json(
-      { error: "Échec image → vidéo (Higgsfield).", step: "video", detail: String(e).slice(0, 400), imageUrl },
+      { error: "Échec soumission image → vidéo (Higgsfield).", step: "video", detail: String(e).slice(0, 400), imageUrl },
       { status: 502 }
     );
   }
