@@ -10,6 +10,7 @@ import { UploadDropzone } from "@/components/dashboard/UploadDropzone";
 import { buildProject } from "@/lib/project-factory";
 import { saveLocalProject } from "@/lib/local-projects";
 import { generateAiScenes, isAiConfigured, type AiScene } from "@/lib/ai-script";
+import { captureSaasScreens } from "@/lib/capture";
 import {
   ambiancePromptFor,
   generateHiggsfieldClip,
@@ -154,6 +155,10 @@ export function NewVideoWizard() {
   const [hfAvailable, setHfAvailable] = useState(false);
   const [clipLoading, setClipLoading] = useState(false);
   const [clipNotice, setClipNotice] = useState<string | null>(null);
+  // Connexion SaaS — non persistée (mot de passe en mémoire du composant).
+  const [saas, setSaas] = useState({ url: "", email: "", password: "", pages: "" });
+  const [captureLoading, setCaptureLoading] = useState(false);
+  const [captureNotice, setCaptureNotice] = useState<string | null>(null);
   const [launchNotice, setLaunchNotice] = useState<string | null>(null);
   const [launching, setLaunching] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -197,6 +202,38 @@ export function NewVideoWizard() {
       );
     } finally {
       setClipLoading(false);
+    }
+  }
+
+  async function captureFromSaas() {
+    if (!/^https?:\/\//i.test(saas.url.trim())) {
+      setCaptureNotice("Entre l'URL de connexion de ton SaaS (https://…).");
+      return;
+    }
+    setCaptureLoading(true);
+    setCaptureNotice(null);
+    try {
+      const pages = saas.pages
+        .split(/[\n,]/)
+        .map((s) => s.trim())
+        .filter(Boolean);
+      const shots = await captureSaasScreens({
+        url: saas.url.trim(),
+        email: saas.email,
+        password: saas.password,
+        pages,
+      });
+      setState((prev) => ({
+        ...prev,
+        screenshots: [...prev.screenshots, ...shots].slice(0, 5),
+      }));
+      setCaptureNotice(
+        `${shots.length} écran${shots.length > 1 ? "s" : ""} capturé${shots.length > 1 ? "s" : ""} et ajouté${shots.length > 1 ? "s" : ""} aux captures.`
+      );
+    } catch (e) {
+      setCaptureNotice(e instanceof Error ? e.message : "Capture impossible.");
+    } finally {
+      setCaptureLoading(false);
     }
   }
 
@@ -598,6 +635,75 @@ export function NewVideoWizard() {
                   accept="image/*"
                   onImagesChange={(urls) => update("screenshots", urls)}
                 />
+
+                <div className="rounded-xl border border-hairline-strong bg-cream/40 p-5">
+                  <p className="text-sm font-medium text-coffee">
+                    Pas de captures ? Connecte ton SaaS
+                  </p>
+                  <p className="mt-0.5 text-xs text-warm-gray">
+                    On se connecte et on capture tes écrans automatiquement. Tes
+                    identifiants transitent le temps de la connexion et ne sont
+                    jamais enregistrés.
+                  </p>
+                  <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                    <Field label="URL de connexion" htmlFor="saasUrl" className="sm:col-span-2">
+                      <TextInput
+                        id="saasUrl"
+                        type="url"
+                        value={saas.url}
+                        onChange={(e) => setSaas((s) => ({ ...s, url: e.target.value }))}
+                        placeholder="https://app.ton-saas.com/login"
+                      />
+                    </Field>
+                    <Field label="Email" htmlFor="saasEmail">
+                      <TextInput
+                        id="saasEmail"
+                        type="email"
+                        autoComplete="off"
+                        value={saas.email}
+                        onChange={(e) => setSaas((s) => ({ ...s, email: e.target.value }))}
+                        placeholder="toi@entreprise.com"
+                      />
+                    </Field>
+                    <Field label="Mot de passe" htmlFor="saasPassword">
+                      <TextInput
+                        id="saasPassword"
+                        type="password"
+                        autoComplete="new-password"
+                        value={saas.password}
+                        onChange={(e) => setSaas((s) => ({ ...s, password: e.target.value }))}
+                        placeholder="••••••••"
+                      />
+                    </Field>
+                    <Field
+                      label="Pages à capturer (optionnel)"
+                      htmlFor="saasPages"
+                      hint="Chemins séparés par des virgules, ex. /dashboard, /reports"
+                      className="sm:col-span-2"
+                    >
+                      <TextInput
+                        id="saasPages"
+                        value={saas.pages}
+                        onChange={(e) => setSaas((s) => ({ ...s, pages: e.target.value }))}
+                        placeholder="/dashboard, /reports"
+                      />
+                    </Field>
+                  </div>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={captureFromSaas}
+                    disabled={captureLoading}
+                    className="mt-4"
+                  >
+                    {captureLoading ? "Connexion et capture…" : "Capturer mes écrans"}
+                  </Button>
+                  {captureNotice && (
+                    <p className="mt-3 text-xs leading-relaxed text-bronze-deep">
+                      {captureNotice}
+                    </p>
+                  )}
+                </div>
 
                 {hfAvailable && (
                   <div className="rounded-xl border border-bronze/30 bg-[#F3E9DC]/50 p-5">

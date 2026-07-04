@@ -13,9 +13,11 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.110.0",
     "@higgsfield/client": "^0.2.1",
+    "@sparticuz/chromium": "^149.0.0",
     "gsap": "^3.12.5",
     "mp4-muxer": "^5.2.2",
     "next": "^14.2.15",
+    "playwright-core": "^1.61.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "stripe": "^16.12.0",
