@@ -16,6 +16,7 @@ import {
   musicPromptFor,
   voiceoverTextFor,
 } from "@/lib/audio";
+import { projectClipUrl } from "@/lib/higgsfield";
 import type { ExportFormat, VideoProject } from "@/types/video";
 
 interface VideoJob {
@@ -84,6 +85,7 @@ export function ExportsPanel({ project }: { project: VideoProject }) {
       const onProgress = (progress: number) =>
         updateJob(format, { status: "working", progress });
 
+      const clipUrl = projectClipUrl(project);
       let blob: Blob;
       let extension: string;
       if (audio) {
@@ -95,6 +97,7 @@ export function ExportsPanel({ project }: { project: VideoProject }) {
           {
             voiceoverText: voiceoverTextFor(project) || undefined,
             musicPrompt: musicPromptFor(project),
+            clipUrl,
           }
         );
         blob = result.blob;
@@ -104,7 +107,8 @@ export function ExportsPanel({ project }: { project: VideoProject }) {
           project,
           format,
           onProgress,
-          project.images ?? []
+          project.images ?? [],
+          clipUrl
         );
         blob = result.blob;
         extension = result.extension;

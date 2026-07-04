@@ -13,6 +13,7 @@ import {
   precomputeTimeline,
   type Precomputed,
 } from "./video-scenes";
+import { loadClipFrames } from "./clip-frames";
 
 /**
  * Génération de la vidéo de démonstration dans le navigateur : le rendu
@@ -241,7 +242,8 @@ export async function generateVideo(
   project: VideoProject,
   format: ExportFormat,
   onProgress: (percent: number) => void,
-  imageUrls: string[] = []
+  imageUrls: string[] = [],
+  clipUrl?: string
 ): Promise<VideoResult> {
   if (typeof VideoEncoder === "undefined") {
     throw new Error(
@@ -270,7 +272,16 @@ export async function generateVideo(
   if (!ctx) throw new Error("Canvas 2D indisponible dans ce navigateur.");
 
   const images = imageUrls.length ? await loadImageSources(imageUrls) : [];
-  const pre = precomputeTimeline(ctx, project, scenes, width, height, images);
+  const clipFrames = clipUrl ? await loadClipFrames(clipUrl).catch(() => null) : null;
+  const pre = precomputeTimeline(
+    ctx,
+    project,
+    scenes,
+    width,
+    height,
+    images,
+    clipFrames
+  );
 
   const ec: EncodeContext = {
     pre,

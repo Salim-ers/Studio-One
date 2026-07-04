@@ -1,4 +1,5 @@
 import type { StoryboardScene, VideoProject } from "@/types/video";
+import type { ClipFrames } from "./clip-frames";
 
 /**
  * Rendu cinématique sombre et moderne, inspiré des démos SaaS pro : fond
@@ -217,6 +218,7 @@ export interface Precomputed {
   stacked: boolean;
   u: number;
   accent: { a1: string; a2: string };
+  clipFrames: ClipFrames | null;
 }
 
 export function precomputeTimeline(
@@ -225,7 +227,8 @@ export function precomputeTimeline(
   scenes: StoryboardScene[],
   width: number,
   height: number,
-  images: Array<{ source: CanvasImageSource; aspect: number }> = []
+  images: Array<{ source: CanvasImageSource; aspect: number }> = [],
+  clipFrames: ClipFrames | null = null
 ): Precomputed {
   const u = Math.min(width, height) / 1080;
   const stacked = width < height * 1.2;
@@ -282,7 +285,7 @@ export function precomputeTimeline(
     return v;
   });
 
-  return { project, visuals, totalSeconds: cursor, stacked, u, accent };
+  return { project, visuals, totalSeconds: cursor, stacked, u, accent, clipFrames };
 }
 
 /* ── Primitives ────────────────────────────────────────────────── */
@@ -323,8 +326,43 @@ function drawBackground(
   w: number,
   h: number,
   t: number,
-  accent: { a1: string; a2: string }
+  accent: { a1: string; a2: string },
+  clip: ClipFrames | null
 ) {
+  // Clip d'ambiance IA en fond animé (assombri pour la lisibilité du texte).
+  if (clip && clip.frames.length > 0) {
+    const idx = Math.floor(t * clip.fps) % clip.frames.length;
+    const frame = clip.frames[idx];
+    const viewAspect = w / h;
+    let dw = w,
+      dh = h;
+    if (clip.aspect > viewAspect) dw = h * clip.aspect;
+    else dh = w / clip.aspect;
+    // léger zoom qui respire
+    const z = 1.04 + Math.sin(t * 0.25) * 0.03;
+    dw *= z;
+    dh *= z;
+    ctx.drawImage(frame, (w - dw) / 2, (h - dh) / 2, dw, dh);
+    // Voile sombre + teinte accent pour garder le texte lisible
+    ctx.fillStyle = "rgba(7,7,13,0.62)";
+    ctx.fillRect(0, 0, w, h);
+    ctx.fillStyle = hexA(accent.a1, 0.1);
+    ctx.fillRect(0, 0, w, h);
+    const vig = ctx.createRadialGradient(
+      w / 2,
+      h / 2,
+      Math.min(w, h) * 0.3,
+      w / 2,
+      h / 2,
+      Math.max(w, h) * 0.75
+    );
+    vig.addColorStop(0, "rgba(0,0,0,0)");
+    vig.addColorStop(1, "rgba(0,0,0,0.55)");
+    ctx.fillStyle = vig;
+    ctx.fillRect(0, 0, w, h);
+    return;
+  }
+
   const g = ctx.createLinearGradient(0, 0, 0, h);
   g.addColorStop(0, THEME.bg1);
   g.addColorStop(1, THEME.bg0);
@@ -737,10 +775,10 @@ export function drawSceneFrame(
   w: number,
   h: number
 ) {
-  const { u, stacked, project, visuals, totalSeconds, accent } = pre;
+  const { u, stacked, project, visuals, totalSeconds, accent, clipFrames } = pre;
   const margin = 96 * u;
 
-  drawBackground(ctx, w, h, time, accent);
+  drawBackground(ctx, w, h, time, accent, clipFrames);
 
   const visual =
     visuals.find((v) => time >= v.start && time < v.end) ??

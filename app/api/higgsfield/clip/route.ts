@@ -107,11 +107,15 @@ export async function POST(request: Request) {
 
   // Étape 2 — image → vidéo (dop)
   try {
+    // Le SDK envoie l'input à plat, mais l'endpoint dop exige un wrapper
+    // `params` (contrairement à flux). On pré-emballe donc l'input.
     const vidJob = await higgsfield.subscribe("/v1/image2video/dop", {
       input: {
-        model: "dop-turbo",
-        prompt: motion,
-        input_images: [{ type: "image_url", image_url: imageUrl }],
+        params: {
+          model: "dop-turbo",
+          prompt: motion,
+          input_images: [{ type: "image_url", image_url: imageUrl }],
+        },
       },
       withPolling: true,
     });

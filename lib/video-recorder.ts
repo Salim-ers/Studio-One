@@ -4,6 +4,7 @@ import {
   loadImageSources,
   precomputeTimeline,
 } from "./video-scenes";
+import { loadClipFrames } from "./clip-frames";
 import { fetchMusic, fetchVoiceover } from "./audio";
 
 /**
@@ -24,6 +25,7 @@ export interface AudioResult {
 export interface AudioOptions {
   voiceoverText?: string;
   musicPrompt?: string;
+  clipUrl?: string;
 }
 
 // Résolution réduite pour rester fluide en temps réel.
@@ -114,7 +116,18 @@ export async function generateVideoWithAudio(
   if (!ctx) throw new Error("Canvas 2D indisponible dans ce navigateur.");
 
   const images = imageUrls.length ? await loadImageSources(imageUrls) : [];
-  const pre = precomputeTimeline(ctx, project, scenes, width, height, images);
+  const clipFrames = options.clipUrl
+    ? await loadClipFrames(options.clipUrl).catch(() => null)
+    : null;
+  const pre = precomputeTimeline(
+    ctx,
+    project,
+    scenes,
+    width,
+    height,
+    images,
+    clipFrames
+  );
 
   // ── Graphe audio → piste de flux ─────────────────────────────────
   const audioCtx = new AudioContext();
