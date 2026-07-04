@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { resolveHiggsfieldCredentials } from "@/lib/higgsfield-server";
+import { getSessionUser } from "@/lib/auth";
 
 /**
  * Lance un clip d'ambiance IA : texte → image (flux, rapide), puis SOUMET
@@ -21,6 +22,12 @@ const resultUrl = (job: any): string | undefined =>
   job?.images?.[0]?.url;
 
 export async function POST(request: Request) {
+  // Endpoint qui dépense des crédits : réservé aux utilisateurs connectés.
+  const user = await getSessionUser();
+  if (!user) {
+    return NextResponse.json({ error: "Non authentifié." }, { status: 401 });
+  }
+
   const credentials = resolveHiggsfieldCredentials();
   if (!credentials) {
     return NextResponse.json(
