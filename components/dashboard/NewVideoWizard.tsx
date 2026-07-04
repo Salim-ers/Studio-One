@@ -10,6 +10,11 @@ import { UploadDropzone } from "@/components/dashboard/UploadDropzone";
 import { buildProject } from "@/lib/project-factory";
 import { saveLocalProject } from "@/lib/local-projects";
 import { generateAiScenes, isAiConfigured, type AiScene } from "@/lib/ai-script";
+import {
+  ambiancePromptFor,
+  generateHiggsfieldClip,
+  isHiggsfieldConfigured,
+} from "@/lib/higgsfield";
 import { cn } from "@/lib/utils";
 import type { VideoDuration, VideoObjective, VideoTone } from "@/types/video";
 
@@ -90,6 +95,7 @@ interface WizardState {
   subtitles: boolean;
   screenshots: string[];
   brief: string;
+  videoClipUrl: string;
 }
 
 const initialState: WizardState = {
@@ -113,6 +119,7 @@ const initialState: WizardState = {
   subtitles: true,
   screenshots: [],
   brief: "",
+  videoClipUrl: "",
 };
 
 /* ── Génération simulée ────────────────────────────────────────── */
@@ -144,6 +151,9 @@ export function NewVideoWizard() {
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved">("idle");
   const [generating, setGenerating] = useState(false);
   const [aiAvailable, setAiAvailable] = useState(false);
+  const [hfAvailable, setHfAvailable] = useState(false);
+  const [clipLoading, setClipLoading] = useState(false);
+  const [clipNotice, setClipNotice] = useState<string | null>(null);
   const [launchNotice, setLaunchNotice] = useState<string | null>(null);
   const [launching, setLaunching] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -157,16 +167,38 @@ export function NewVideoWizard() {
     saveTimer.current = setTimeout(() => setSaveStatus("saved"), 700);
   }
 
-  /* Génération IA disponible ? (clé côté serveur) */
+  /* Générations IA disponibles ? (clés côté serveur) */
   useEffect(() => {
     let alive = true;
-    isAiConfigured().then((ok) => {
-      if (alive) setAiAvailable(ok);
-    });
+    isAiConfigured().then((ok) => alive && setAiAvailable(ok));
+    isHiggsfieldConfigured().then((ok) => alive && setHfAvailable(ok));
     return () => {
       alive = false;
     };
   }, []);
+
+  async function generateAmbianceClip() {
+    setClipLoading(true);
+    setClipNotice(null);
+    try {
+      const { videoUrl } = await generateHiggsfieldClip({
+        prompt: ambiancePromptFor({
+          productName: state.productName.trim() || "le produit",
+          sector: state.sector,
+          brief: state.brief,
+        }),
+        aspectRatio: "16:9",
+      });
+      update("videoClipUrl", videoUrl);
+      setClipNotice(null);
+    } catch (e) {
+      setClipNotice(
+        e instanceof Error ? e.message : "Génération du clip impossible."
+      );
+    } finally {
+      setClipLoading(false);
+    }
+  }
 
   /* Transition GSAP entre étapes */
   useEffect(() => {
@@ -286,6 +318,7 @@ export function NewVideoWizard() {
       subtitles: state.subtitles,
       images: state.screenshots,
       aiScenes: state.aiScenes ?? undefined,
+      videoClipUrl: state.videoClipUrl || undefined,
     });
 
     if (!saveLocalProject(project)) {
@@ -565,6 +598,49 @@ export function NewVideoWizard() {
                   accept="image/*"
                   onImagesChange={(urls) => update("screenshots", urls)}
                 />
+
+                {hfAvailable && (
+                  <div className="rounded-xl border border-bronze/30 bg-[#F3E9DC]/50 p-5">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-medium text-coffee">
+                          Ambiance IA (Higgsfield)
+                        </p>
+                        <p className="mt-0.5 text-xs text-warm-gray">
+                          Génère un clip cinématique lié à l&apos;univers de ton
+                          produit (rappels graphiques du domaine). ~1–2 min,
+                          payant au crédit.
+                        </p>
+                      </div>
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        onClick={generateAmbianceClip}
+                        disabled={clipLoading}
+                      >
+                        {clipLoading
+                          ? "Génération…"
+                          : state.videoClipUrl
+                            ? "Régénérer"
+                            : "Générer un clip"}
+                      </Button>
+                    </div>
+                    {state.videoClipUrl && !clipLoading && (
+                      <video
+                        src={`/api/higgsfield/proxy?url=${encodeURIComponent(state.videoClipUrl)}`}
+                        className="mt-3 w-full max-w-sm rounded-lg border border-hairline"
+                        controls
+                        muted
+                        playsInline
+                      />
+                    )}
+                    {clipNotice && (
+                      <p role="alert" className="mt-3 text-xs leading-relaxed text-red-700">
+                        {clipNotice}
+                      </p>
+                    )}
+                  </div>
+                )}
                 <UploadDropzone
                   label="Vidéos courtes (optionnel)"
                   hint="Enregistrements d'écran MP4 ou MOV, 60 secondes maximum par clip."

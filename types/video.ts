@@ -67,6 +67,8 @@ export interface VideoProject {
   renderStartedAt?: string;
   /** Captures produit (data URLs réduites) animées dans la vidéo. */
   images?: string[];
+  /** Clip d'ambiance IA (Higgsfield) — URL distante, utilisé en fond/transition. */
+  videoClipUrl?: string;
 }
 
 export interface ProjectBrief {

@@ -68,6 +68,18 @@ champ « Ce que tu veux » et des paramètres du tunnel — le rendu s'adapte al
 vraiment à ce que tu demandes. La clé reste côté serveur (`app/api/ai/*`).
 Sans clé, le tunnel retombe sur la génération par gabarit.
 
+## Clip d'ambiance IA (Higgsfield)
+
+Renseigne `HF_CREDENTIALS` (`KEY_ID:KEY_SECRET`) ou le couple `HF_API_KEY` +
+`HF_API_SECRET`. Une option « Ambiance IA (Higgsfield) » apparaît alors à
+l'étape « Assets » du tunnel : elle génère un clip cinématique lié à l'univers
+du produit (texte → image _flux_, puis image → vidéo _dop_), affiché et
+téléchargeable sur la page projet. Les clés restent côté serveur
+(`app/api/higgsfield/*`). La génération est **asynchrone (~1–2 min) et payante
+au crédit** ; la route bloque jusqu'au résultat (`maxDuration` 300 s — nécessite
+un plan Vercel autorisant les fonctions longues). L'intégration du clip **dans**
+le montage (fond/transition) suit, une fois la génération validée.
+
 ## Captures produit
 
 Dépose des captures de ton SaaS à l'étape « Assets » du tunnel : elles sont

@@ -15,6 +15,7 @@ import { statusLabels, objectiveLabels } from "@/lib/mock-data";
 import { formatDate } from "@/lib/utils";
 import { RENDER_DURATION_MS, withRenderProgress } from "@/lib/render";
 import { saveLocalProject } from "@/lib/local-projects";
+import { projectClipUrl } from "@/lib/higgsfield";
 import type { VideoProject } from "@/types/video";
 import type { SubscriptionState } from "@/types/billing";
 
@@ -211,6 +212,36 @@ export function ProjectView({
               })}
             </div>
           </section>
+
+          {/* Ambiance IA (Higgsfield) */}
+          {projectClipUrl(project) && (
+            <section aria-label="Clip d'ambiance IA">
+              <h2 className="mb-4 font-display text-lg text-coffee">
+                Ambiance IA
+              </h2>
+              <div className="card-surface overflow-hidden">
+                <video
+                  src={projectClipUrl(project)}
+                  className="w-full"
+                  controls
+                  muted
+                  playsInline
+                />
+                <div className="flex items-center justify-between gap-3 p-4">
+                  <p className="text-xs text-warm-gray">
+                    Clip cinématique généré par Higgsfield.
+                  </p>
+                  <a
+                    href={projectClipUrl(project)}
+                    download={`${project.productName}-ambiance.mp4`}
+                    className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-hairline-strong px-3.5 py-1.5 text-xs font-medium text-coffee transition-all hover:border-bronze hover:text-bronze-deep"
+                  >
+                    Télécharger
+                  </a>
+                </div>
+              </div>
+            </section>
+          )}
 
           {/* Exports */}
           <section aria-label="Fichiers d'export" id="exports" className="scroll-mt-24">

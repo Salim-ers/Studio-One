@@ -29,6 +29,7 @@ export interface CreateProjectInput {
   scriptText: string;
   subtitles?: boolean;
   images?: string[];
+  videoClipUrl?: string;
   /** Scènes générées par IA — remplacent le storyboard par gabarit si fournies. */
   aiScenes?: Array<{
     role: string;
@@ -227,5 +228,6 @@ export function buildProject(input: CreateProjectInput): VideoProject {
     updatedAt: now,
     renderStartedAt: now,
     images: input.images && input.images.length ? input.images : undefined,
+    videoClipUrl: input.videoClipUrl || undefined,
   };
 }
