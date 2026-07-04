@@ -54,6 +54,14 @@ export async function POST(request: Request) {
     );
   }
 
+  // Récupère l'URL du premier résultat d'un JobSet, quelle que soit la forme.
+  const resultUrl = (job: any): string | undefined =>
+    job?.jobs?.[0]?.results?.raw?.url ??
+    job?.jobs?.[0]?.results?.min?.url ??
+    job?.results?.raw?.url ??
+    job?.video?.url ??
+    job?.images?.[0]?.url;
+
   // Étape 1 — texte → image (flux)
   let imageUrl: string | undefined;
   try {
@@ -64,29 +72,35 @@ export async function POST(request: Request) {
         withPolling: true,
       }
     );
-    if (imgJob.isNsfw) {
+    const st = String(imgJob?.status ?? "");
+    if (st === "nsfw" || imgJob?.isNsfw) {
       return NextResponse.json(
         { error: "Image refusée par la modération. Reformule le thème.", step: "image" },
         { status: 422 }
       );
     }
-    if (!imgJob.isCompleted) {
+    if (st === "failed") {
       return NextResponse.json(
-        { error: "Génération d'image non aboutie.", step: "image", status: imgJob.status },
+        { error: "La génération d'image a échoué.", step: "image" },
         { status: 502 }
       );
     }
-    imageUrl = imgJob.jobs?.[0]?.results?.raw?.url;
+    imageUrl = resultUrl(imgJob);
+    if (!imageUrl) {
+      return NextResponse.json(
+        {
+          error: "Aucune URL d'image renvoyée.",
+          step: "image",
+          status: st,
+          jobs: Array.isArray(imgJob?.jobs) ? imgJob.jobs.length : 0,
+          keys: imgJob ? Object.keys(imgJob).slice(0, 12) : [],
+        },
+        { status: 502 }
+      );
+    }
   } catch (e) {
     return NextResponse.json(
       { error: "Échec texte → image (Higgsfield).", step: "image", detail: String(e).slice(0, 400) },
-      { status: 502 }
-    );
-  }
-
-  if (!imageUrl) {
-    return NextResponse.json(
-      { error: "Aucune image renvoyée.", step: "image" },
       { status: 502 }
     );
   }
@@ -101,16 +115,24 @@ export async function POST(request: Request) {
       },
       withPolling: true,
     });
-    if (!vidJob.isCompleted) {
+    const st = String(vidJob?.status ?? "");
+    if (st === "failed") {
       return NextResponse.json(
-        { error: "Génération vidéo non aboutie.", step: "video", status: vidJob.status, imageUrl },
+        { error: "La génération vidéo a échoué.", step: "video", imageUrl },
         { status: 502 }
       );
     }
-    const videoUrl = vidJob.jobs?.[0]?.results?.raw?.url;
+    const videoUrl = resultUrl(vidJob);
     if (!videoUrl) {
       return NextResponse.json(
-        { error: "Aucune vidéo renvoyée.", step: "video", imageUrl },
+        {
+          error: "Aucune URL de vidéo renvoyée.",
+          step: "video",
+          status: st,
+          jobs: Array.isArray(vidJob?.jobs) ? vidJob.jobs.length : 0,
+          keys: vidJob ? Object.keys(vidJob).slice(0, 12) : [],
+          imageUrl,
+        },
         { status: 502 }
       );
     }
