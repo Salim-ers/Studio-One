@@ -384,7 +384,8 @@ function hexA(hex: string, a: number): string {
   return `rgba(${r},${g},${b},${a})`;
 }
 
-function drawImageCover(
+/** Affiche TOUTE la capture (fit/contain), centrée, sans recadrer l'interface. */
+function drawImageContain(
   ctx: CanvasRenderingContext2D,
   img: CanvasImageSource,
   aspect: number,
@@ -392,17 +393,24 @@ function drawImageCover(
   y: number,
   w: number,
   h: number,
-  zoom = 1,
-  panX = 0,
-  panY = 0
+  scale = 1
 ) {
+  // Fond sombre derrière les éventuelles bandes (letterbox).
+  ctx.fillStyle = "#0B0B12";
+  ctx.fillRect(x, y, w, h);
   const viewAspect = w / h;
-  let dw = w * zoom;
-  let dh = h * zoom;
-  if (aspect > viewAspect) dw = dh * aspect;
-  else dh = dw / aspect;
-  const dx = x + (w - dw) / 2 + panX * w;
-  const dy = y + (h - dh) / 2 + panY * h;
+  let dw: number, dh: number;
+  if (aspect > viewAspect) {
+    dw = w;
+    dh = w / aspect;
+  } else {
+    dh = h;
+    dw = h * aspect;
+  }
+  dw *= scale;
+  dh *= scale;
+  const dx = x + (w - dw) / 2;
+  const dy = y + (h - dh) / 2;
   ctx.drawImage(img, dx, dy, dw, dh);
 }
 
@@ -495,8 +503,8 @@ function drawFloating(
   roundRect(ctx, 6 * u, barH, w - 12 * u, h - barH - 6 * u, 10 * u);
   ctx.clip();
   if (visual.image) {
-    const zoom = lerp(1.05, 1.12, easeInOutCubic((Math.sin(t * 0.3) + 1) / 2));
-    drawImageCover(
+    const scale = lerp(1.0, 1.02, easeInOutCubic((Math.sin(t * 0.3) + 1) / 2));
+    drawImageContain(
       ctx,
       visual.image,
       visual.imageAspect ?? 16 / 9,
@@ -504,9 +512,7 @@ function drawFloating(
       barH,
       w - 12 * u,
       h - barH - 6 * u,
-      zoom,
-      Math.sin(t * 0.22) * 0.02,
-      0
+      scale
     );
   } else {
     drawFakeDashboard(ctx, 6 * u, barH, w - 12 * u, h - barH - 6 * u, t, local, u, accent);
@@ -649,7 +655,7 @@ function drawSpotlight(
   const vw = w - 12 * u;
   const vh = h - barH - 6 * u;
   if (visual.image) {
-    drawImageCover(ctx, visual.image, visual.imageAspect ?? 16 / 9, vx, vy, vw, vh, 1.02);
+    drawImageContain(ctx, visual.image, visual.imageAspect ?? 16 / 9, vx, vy, vw, vh, 1.0);
   } else {
     drawFakeDashboard(ctx, vx, vy, vw, vh, t, local, u, accent);
   }

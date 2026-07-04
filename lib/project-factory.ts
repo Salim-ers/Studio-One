@@ -29,6 +29,58 @@ export interface CreateProjectInput {
   scriptText: string;
   subtitles?: boolean;
   images?: string[];
+  /** Scènes générées par IA — remplacent le storyboard par gabarit si fournies. */
+  aiScenes?: Array<{
+    role: string;
+    title: string;
+    description: string;
+    durationSeconds: number;
+    voiceOver: string;
+  }>;
+}
+
+const VALID_ROLES: StoryboardScene["role"][] = [
+  "intro",
+  "probleme",
+  "solution",
+  "fonctionnalites",
+  "benefices",
+  "preuve",
+  "conclusion",
+  "cta",
+];
+
+/** Convertit des scènes IA en storyboard, avec durées renormalisées à la durée cible. */
+function scenesFromAi(
+  ai: NonNullable<CreateProjectInput["aiScenes"]>,
+  totalDuration: number
+): StoryboardScene[] {
+  const cleaned = ai.filter((s) =>
+    VALID_ROLES.includes(s.role as StoryboardScene["role"])
+  );
+  const rawSum = cleaned.reduce(
+    (acc, s) => acc + Math.max(1, Math.round(s.durationSeconds || 0)),
+    0
+  );
+  const scale = rawSum > 0 ? totalDuration / rawSum : 1;
+
+  let allocated = 0;
+  return cleaned.map((s, i) => {
+    const isLast = i === cleaned.length - 1;
+    const durationSeconds = isLast
+      ? Math.max(1, totalDuration - allocated)
+      : Math.max(1, Math.round((s.durationSeconds || 1) * scale));
+    allocated += durationSeconds;
+    return {
+      id: `sc-${i + 1}`,
+      order: i + 1,
+      role: s.role as StoryboardScene["role"],
+      title: s.title,
+      description: s.description,
+      durationSeconds,
+      voiceOver: s.voiceOver,
+    };
+  });
 }
 
 const sceneTemplates: Array<{
@@ -152,6 +204,11 @@ export function buildProject(input: CreateProjectInput): VideoProject {
   // Mode test : tous les formats d'export sont inclus, quelle que soit la durée.
   const formats: ExportFormat[] = ["16:9", "9:16", "1:1"];
 
+  const scenes =
+    input.aiScenes && input.aiScenes.length >= 3
+      ? scenesFromAi(input.aiScenes, input.duration)
+      : buildScenes(input);
+
   return {
     id: generateProjectId(),
     name: `${input.productName} — Nouvelle démo`,
@@ -162,7 +219,7 @@ export function buildProject(input: CreateProjectInput): VideoProject {
     tone: input.tone,
     language: input.language,
     formats,
-    scenes: buildScenes(input),
+    scenes,
     scriptVersion: 1,
     clarityScore: computeClarityScore(input),
     renderProgress: 0,

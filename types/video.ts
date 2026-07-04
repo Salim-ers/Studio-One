@@ -1,4 +1,4 @@
-export type VideoDuration = 60 | 90 | 120;
+export type VideoDuration = 40 | 60 | 90 | 120;
 
 export type VideoObjective =
   | "demo-commerciale"

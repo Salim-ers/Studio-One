@@ -9,6 +9,7 @@ import { Field, TextInput, TextArea, Select } from "@/components/ui/Field";
 import { UploadDropzone } from "@/components/dashboard/UploadDropzone";
 import { buildProject } from "@/lib/project-factory";
 import { saveLocalProject } from "@/lib/local-projects";
+import { generateAiScenes, isAiConfigured, type AiScene } from "@/lib/ai-script";
 import { cn } from "@/lib/utils";
 import type { VideoDuration, VideoObjective, VideoTone } from "@/types/video";
 
@@ -42,6 +43,7 @@ const objectives: {
 ];
 
 const durations: { value: VideoDuration; title: string; detail: string }[] = [
+  { value: 40, title: "Pub / réseaux — full démo", detail: "40 secondes ultra-rythmées : accroche, produit, bénéfice, CTA. Le format publicité et social." },
   { value: 60, title: "Impact commercial rapide", detail: "Accroche, fonctionnalité phare, bénéfice, CTA. Le format des réseaux et de la prospection." },
   { value: 90, title: "Démonstration standard premium", detail: "Problème, solution, trois fonctionnalités, preuve. Le format recommandé pour la plupart des démos." },
   { value: 120, title: "Démonstration complète", detail: "Storytelling poussé : contexte, cas d'usage, bénéfices chiffrés, preuve client." },
@@ -81,11 +83,13 @@ interface WizardState {
   cta: string;
   brandColors: string;
   storyboardGenerated: boolean;
+  aiScenes: AiScene[] | null;
   scriptText: string;
   narrationStyle: "voix-off" | "demonstration" | "temoignage";
   scriptLength: "concis" | "standard" | "detaille";
   subtitles: boolean;
   screenshots: string[];
+  brief: string;
 }
 
 const initialState: WizardState = {
@@ -102,11 +106,13 @@ const initialState: WizardState = {
   cta: "",
   brandColors: "",
   storyboardGenerated: false,
+  aiScenes: null,
   scriptText: "",
   narrationStyle: "voix-off",
   scriptLength: "standard",
   subtitles: true,
   screenshots: [],
+  brief: "",
 };
 
 /* ── Génération simulée ────────────────────────────────────────── */
@@ -117,8 +123,11 @@ function buildScript(state: WizardState): string {
   const promise = state.promise || "un résultat clair, plus vite";
   const audience = state.audience || "vos équipes";
   const cta = state.cta || `Essayez ${name} dès aujourd'hui.`;
+  const hook =
+    state.brief.trim() ||
+    `${audience.charAt(0).toUpperCase() + audience.slice(1)} perdent un temps précieux face à ${problem}.`;
   return [
-    `${audience.charAt(0).toUpperCase() + audience.slice(1)} perdent un temps précieux face à ${problem}.`,
+    hook,
     `${name} change la donne : ${promise}.`,
     `En quelques clics, tout est structuré, visible et partageable — sans formation, sans friction.`,
     `Résultat : des décisions plus rapides et une équipe concentrée sur ce qui compte.`,
@@ -134,6 +143,7 @@ export function NewVideoWizard() {
   const [state, setState] = useState<WizardState>(initialState);
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved">("idle");
   const [generating, setGenerating] = useState(false);
+  const [aiAvailable, setAiAvailable] = useState(false);
   const [launchNotice, setLaunchNotice] = useState<string | null>(null);
   const [launching, setLaunching] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -146,6 +156,17 @@ export function NewVideoWizard() {
     clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => setSaveStatus("saved"), 700);
   }
+
+  /* Génération IA disponible ? (clé côté serveur) */
+  useEffect(() => {
+    let alive = true;
+    isAiConfigured().then((ok) => {
+      if (alive) setAiAvailable(ok);
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   /* Transition GSAP entre étapes */
   useEffect(() => {
@@ -193,8 +214,38 @@ export function NewVideoWizard() {
   ];
   const checklistComplete = checklist.every((c) => c.done);
 
-  function generateStoryboard() {
+  async function generateStoryboard() {
     setGenerating(true);
+    // Avec l'IA (si configurée), le storyboard et la voix off sont écrits par
+    // Claude à partir du brief. Sinon, repli sur le gabarit.
+    if (aiAvailable && state.objective && state.duration) {
+      try {
+        const scenes = await generateAiScenes({
+          productName: state.productName.trim(),
+          duration: state.duration,
+          tone: state.tone,
+          language: state.language,
+          objective: state.objective,
+          brief: state.brief,
+          problem: state.problem,
+          promise: state.promise,
+          audience: state.audience,
+          cta: state.cta,
+          sector: state.sector,
+        });
+        setState((prev) => ({
+          ...prev,
+          aiScenes: scenes,
+          storyboardGenerated: true,
+          scriptText: scenes.map((s) => s.voiceOver.trim()).filter(Boolean).join("\n\n"),
+        }));
+        setSaveStatus("saved");
+        setGenerating(false);
+        return;
+      } catch {
+        // repli silencieux sur le gabarit
+      }
+    }
     setTimeout(() => {
       update("storyboardGenerated", true);
       setGenerating(false);
@@ -204,9 +255,12 @@ export function NewVideoWizard() {
   function generateScript() {
     setGenerating(true);
     setTimeout(() => {
-      update("scriptText", buildScript(state));
+      const text = state.aiScenes
+        ? state.aiScenes.map((s) => s.voiceOver.trim()).filter(Boolean).join("\n\n")
+        : buildScript(state);
+      update("scriptText", text);
       setGenerating(false);
-    }, 900);
+    }, 700);
   }
 
   function launchRender() {
@@ -231,6 +285,7 @@ export function NewVideoWizard() {
       scriptText: state.scriptText,
       subtitles: state.subtitles,
       images: state.screenshots,
+      aiScenes: state.aiScenes ?? undefined,
     });
 
     if (!saveLocalProject(project)) {
@@ -334,7 +389,7 @@ export function NewVideoWizard() {
                   .
                 </p>
               )}
-              <div className="mt-6 grid gap-3 md:grid-cols-3">
+              <div className="mt-6 grid gap-3 sm:grid-cols-2 md:grid-cols-4">
                 {durations.map((d) => (
                   <button
                     key={d.value}
@@ -457,6 +512,19 @@ export function NewVideoWizard() {
                     value={state.cta}
                     onChange={(e) => update("cta", e.target.value)}
                     placeholder="Essayez Nova CRM gratuitement pendant 14 jours."
+                  />
+                </Field>
+                <Field
+                  label="Ce que tu veux (accroche / angle)"
+                  htmlFor="brief"
+                  hint="Dicte le ton et le message d'ouverture — c'est ce qui pilote le script."
+                  className="sm:col-span-2"
+                >
+                  <TextArea
+                    id="brief"
+                    value={state.brief}
+                    onChange={(e) => update("brief", e.target.value)}
+                    placeholder="Ex. : Punchy et rassurant. Montrer que Nova fait gagner 5 h par semaine aux commerciaux."
                   />
                 </Field>
               </div>

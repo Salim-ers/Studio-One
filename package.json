@@ -11,6 +11,7 @@
     "capture": "node scripts/capture-saas.mjs"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.110.0",
     "gsap": "^3.12.5",
     "mp4-muxer": "^5.2.2",
     "next": "^14.2.15",

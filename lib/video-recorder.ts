@@ -118,6 +118,9 @@ export async function generateVideoWithAudio(
 
   // ── Graphe audio → piste de flux ─────────────────────────────────
   const audioCtx = new AudioContext();
+  // Créé après des await (fetch) : peut démarrer suspendu → on le réveille,
+  // sinon la piste audio capturée serait muette.
+  await audioCtx.resume().catch(() => {});
   const voice = voiceBuf ? await decodeSafe(audioCtx, voiceBuf) : null;
   const music = musicBuf ? await decodeSafe(audioCtx, musicBuf) : null;
   onProgress(12);

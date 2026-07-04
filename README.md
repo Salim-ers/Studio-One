@@ -60,6 +60,14 @@ mixées dans la vidéo. Ce rendu utilise `MediaRecorder` + `captureStream`
 réel** (durée de la vidéo) et exporte un WebM. La clé reste côté serveur
 (`app/api/audio/*`), jamais exposée au navigateur.
 
+## Script piloté par IA (Claude)
+
+Ajoute `ANTHROPIC_API_KEY` dans `.env.local` pour que le storyboard et la voix
+off soient **écrits par Claude** (Opus 4.8, sortie structurée) à partir du
+champ « Ce que tu veux » et des paramètres du tunnel — le rendu s'adapte alors
+vraiment à ce que tu demandes. La clé reste côté serveur (`app/api/ai/*`).
+Sans clé, le tunnel retombe sur la génération par gabarit.
+
 ## Captures produit
 
 Dépose des captures de ton SaaS à l'étape « Assets » du tunnel : elles sont

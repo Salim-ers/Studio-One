@@ -55,8 +55,10 @@ export function ExportsPanel({ project }: { project: VideoProject }) {
     let alive = true;
     isAudioConfigured().then((ok) => {
       if (!alive) return;
+      // Option disponible mais NON cochée par défaut : le téléchargement muet
+      // (rapide, fiable) reste le comportement par défaut. L'audio (rendu
+      // temps réel) est un choix explicite.
       setAudioAvailable(ok);
-      setWithAudio(ok);
     });
     return () => {
       alive = false;
