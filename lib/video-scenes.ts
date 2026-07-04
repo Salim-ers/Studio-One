@@ -1,45 +1,44 @@
 import type { StoryboardScene, VideoProject } from "@/types/video";
 
 /**
- * Rendu cinématique des scènes sur canvas : fond animé, typographie
- * cinétique, mock d'interface en mouvement, effet Ken Burns sur les
- * captures, compteurs/barres animés, ouverture et CTA. Le layout des
- * textes est précalculé une fois par format ; seules les positions et
- * opacités sont animées image par image (performances d'encodage).
+ * Rendu cinématique sombre et moderne, inspiré des démos SaaS pro : fond
+ * sombre premium avec halo de la couleur du produit, typographie cinétique à
+ * dégradé, et la VRAIE interface mise en scène (cartes qui flottent en léger
+ * 3D, spotlight, curseur animé qui clique, glow). L'accent est dérivé
+ * automatiquement des couleurs des captures fournies — le style s'adapte donc
+ * à chaque produit. Le layout est précalculé une fois par format ; seules les
+ * positions/opacités sont animées image par image.
  */
 
-export const PALETTE = {
-  coffee: "#18110C",
-  ink: "#241812",
-  bronze: "#9A6A3A",
-  bronzeDeep: "#6F4726",
-  caramel: "#B9854D",
-  warmGray: "#8C8178",
-  ivory: "#FFFDF8",
-  cream: "#F3E9DC",
-  creamDeep: "#EAD9C3",
+const THEME = {
+  bg0: "#07070D",
+  bg1: "#0E0E18",
+  card: "#15151F",
+  cardBar: "#1C1C28",
+  textHi: "#FFFFFF",
+  textLo: "#A6A2B8",
+  hairline: "rgba(255,255,255,0.10)",
 };
+
+const DEFAULT_ACCENT = { a1: "#7C5CFF", a2: "#C24BFF" };
 
 const ROLE_LABELS: Record<StoryboardScene["role"], string> = {
   intro: "Intro",
   probleme: "Le problème",
   solution: "La solution",
   fonctionnalites: "Fonctionnalités",
-  benefices: "Bénéfices",
+  benefices: "Résultats",
   preuve: "Preuve",
-  conclusion: "Conclusion",
+  conclusion: "En résumé",
   cta: "Passez à l'action",
 };
 
-const DISPLAY_FONT = "Georgia, 'Times New Roman', serif";
-const BODY_FONT =
-  "system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif";
+const FONT = "system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif";
 
-/* ── Utilitaires d'animation ───────────────────────────────────── */
+/* ── Utilitaires ───────────────────────────────────────────────── */
 
 const clamp = (v: number, min = 0, max = 1) => Math.min(max, Math.max(min, v));
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
-
 const easeOutCubic = (t: number) => 1 - Math.pow(1 - clamp(t), 3);
 const easeInOutCubic = (t: number) => {
   const x = clamp(t);
@@ -52,7 +51,6 @@ const easeOutBack = (t: number) => {
   return 1 + c3 * Math.pow(x - 1, 3) + c1 * Math.pow(x - 1, 2);
 };
 
-/** PRNG déterministe (LCG) pour des positions stables entre encodages. */
 function seeded(seed: number): () => number {
   let s = (seed * 9301 + 49297) % 233280;
   return () => {
@@ -61,61 +59,88 @@ function seeded(seed: number): () => number {
   };
 }
 
-/* ── Précalcul du layout ───────────────────────────────────────── */
-
-function breakLongWord(
-  ctx: CanvasRenderingContext2D,
-  word: string,
-  maxWidth: number
-): string[] {
-  if (ctx.measureText(word).width <= maxWidth) return [word];
-  const parts: string[] = [];
-  let current = "";
-  for (let i = 0; i < word.length; i++) {
-    const attempt = current + word[i];
-    if (ctx.measureText(attempt).width <= maxWidth || !current) current = attempt;
-    else {
-      parts.push(current);
-      current = word[i];
-    }
-  }
-  if (current) parts.push(current);
-  return parts;
+function hslToHex(h: number, s: number, l: number): string {
+  h = ((h % 360) + 360) % 360;
+  const c = (1 - Math.abs(2 * l - 1)) * s;
+  const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
+  const m = l - c / 2;
+  let r = 0,
+    g = 0,
+    b = 0;
+  if (h < 60) [r, g, b] = [c, x, 0];
+  else if (h < 120) [r, g, b] = [x, c, 0];
+  else if (h < 180) [r, g, b] = [0, c, x];
+  else if (h < 240) [r, g, b] = [0, x, c];
+  else if (h < 300) [r, g, b] = [x, 0, c];
+  else [r, g, b] = [c, 0, x];
+  const to = (v: number) =>
+    Math.round((v + m) * 255)
+      .toString(16)
+      .padStart(2, "0");
+  return `#${to(r)}${to(g)}${to(b)}`;
 }
 
-function wrapText(
-  ctx: CanvasRenderingContext2D,
-  text: string,
-  maxWidth: number,
-  maxLines: number
-): string[] {
-  const rawWords = text.split(/\s+/).filter(Boolean);
-  const words: string[] = [];
-  for (const w of rawWords) for (const p of breakLongWord(ctx, w, maxWidth)) words.push(p);
+function rgbToHsl(r: number, g: number, b: number): [number, number, number] {
+  r /= 255;
+  g /= 255;
+  b /= 255;
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  let h = 0;
+  const l = (max + min) / 2;
+  const d = max - min;
+  const s = d === 0 ? 0 : d / (1 - Math.abs(2 * l - 1));
+  if (d !== 0) {
+    if (max === r) h = ((g - b) / d) % 6;
+    else if (max === g) h = (b - r) / d + 2;
+    else h = (r - g) / d + 4;
+    h *= 60;
+  }
+  return [((h % 360) + 360) % 360, s, l];
+}
 
-  const lines: string[] = [];
-  let current = "";
-  for (let i = 0; i < words.length; i++) {
-    const attempt = current ? `${current} ${words[i]}` : words[i];
-    if (ctx.measureText(attempt).width <= maxWidth || !current) current = attempt;
-    else {
-      lines.push(current);
-      current = words[i];
-      if (lines.length === maxLines - 1) {
-        let rest = current;
-        for (let j = i + 1; j < words.length; j++) rest += ` ${words[j]}`;
-        while (rest.length > 1 && ctx.measureText(`${rest}…`).width > maxWidth)
-          rest = rest.slice(0, -1).trimEnd();
-        lines.push(rest === current ? rest : `${rest}…`);
-        return lines;
+/** Couleur d'accent vibrante dérivée d'une capture (teinte dominante). */
+function deriveAccent(
+  image: CanvasImageSource | undefined
+): { a1: string; a2: string } {
+  if (!image || typeof document === "undefined") return DEFAULT_ACCENT;
+  try {
+    const c = document.createElement("canvas");
+    c.width = 40;
+    c.height = 40;
+    const cx = c.getContext("2d", { willReadFrequently: true });
+    if (!cx) return DEFAULT_ACCENT;
+    cx.drawImage(image, 0, 0, 40, 40);
+    const { data } = cx.getImageData(0, 0, 40, 40);
+    let sx = 0,
+      sy = 0,
+      satSum = 0,
+      count = 0;
+    for (let i = 0; i < data.length; i += 4) {
+      const [h, s, l] = rgbToHsl(data[i], data[i + 1], data[i + 2]);
+      if (s > 0.28 && l > 0.2 && l < 0.82) {
+        const rad = (h * Math.PI) / 180;
+        const w = s;
+        sx += Math.cos(rad) * w;
+        sy += Math.sin(rad) * w;
+        satSum += s;
+        count += 1;
       }
     }
+    if (count < 12) return DEFAULT_ACCENT;
+    const hue = (Math.atan2(sy, sx) * 180) / Math.PI;
+    const sat = clamp((satSum / count) * 1.15, 0.55, 0.9);
+    return {
+      a1: hslToHex(hue, sat, 0.62),
+      a2: hslToHex(hue + 32, sat, 0.58),
+    };
+  } catch {
+    return DEFAULT_ACCENT;
   }
-  if (current) lines.push(current);
-  return lines;
 }
 
-/** Charge des captures (data URLs ou URLs) en sources dessinables. */
+/* ── Chargement des captures ───────────────────────────────────── */
+
 export async function loadImageSources(
   urls: string[]
 ): Promise<Array<{ source: CanvasImageSource; aspect: number }>> {
@@ -140,6 +165,39 @@ export async function loadImageSources(
   );
 }
 
+/* ── Layout ────────────────────────────────────────────────────── */
+
+function wrapText(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  maxWidth: number,
+  maxLines: number
+): string[] {
+  const words = text.split(/\s+/).filter(Boolean);
+  const lines: string[] = [];
+  let current = "";
+  for (let i = 0; i < words.length; i++) {
+    const attempt = current ? `${current} ${words[i]}` : words[i];
+    if (ctx.measureText(attempt).width <= maxWidth || !current) current = attempt;
+    else {
+      lines.push(current);
+      current = words[i];
+      if (lines.length === maxLines - 1) {
+        let rest = current;
+        for (let j = i + 1; j < words.length; j++) rest += ` ${words[j]}`;
+        while (rest.length > 1 && ctx.measureText(`${rest}…`).width > maxWidth)
+          rest = rest.slice(0, -1).trimEnd();
+        lines.push(rest === current ? rest : `${rest}…`);
+        return lines;
+      }
+    }
+  }
+  if (current) lines.push(current);
+  return lines;
+}
+
+type SceneMode = "intro" | "cta" | "float" | "spotlight" | "stats" | "mock";
+
 export interface SceneVisual {
   scene: StoryboardScene;
   start: number;
@@ -149,6 +207,7 @@ export interface SceneVisual {
   subtitleLines: string[];
   image?: CanvasImageSource;
   imageAspect?: number;
+  mode: SceneMode;
 }
 
 export interface Precomputed {
@@ -157,6 +216,7 @@ export interface Precomputed {
   totalSeconds: number;
   stacked: boolean;
   u: number;
+  accent: { a1: string; a2: string };
 }
 
 export function precomputeTimeline(
@@ -169,38 +229,44 @@ export function precomputeTimeline(
 ): Precomputed {
   const u = Math.min(width, height) / 1080;
   const stacked = width < height * 1.2;
-  const margin = 92 * u;
+  const margin = 96 * u;
+  const accent = deriveAccent(images[0]?.source);
 
-  // Zone de texte : moitié gauche en paysage, pleine largeur en portrait.
-  const textWidth = stacked ? width - margin * 2 : width * 0.5 - margin * 1.2;
-  const titleSize = Math.round((stacked ? 68 : 76) * u);
-  const descSize = Math.round(34 * u);
+  const textWidth = stacked ? width - margin * 2 : width * 0.52 - margin * 1.1;
+  const titleSize = Math.round((stacked ? 74 : 82) * u);
+  const descSize = Math.round(33 * u);
   const subSize = Math.round(32 * u);
 
-  // Répartition des captures fournies sur les scènes de contenu (layout
-  // standard). L'intro et le CTA ont leur propre mise en scène.
-  const imageScenes = scenes.filter(
+  const contentScenes = scenes.filter(
     (s) => s.role !== "intro" && s.role !== "cta"
   );
   const imageFor = new Map<string, { source: CanvasImageSource; aspect: number }>();
   if (images.length > 0) {
-    imageScenes.forEach((s, i) => {
-      if (images.length) imageFor.set(s.id, images[i % images.length]);
-    });
+    contentScenes.forEach((s, i) => imageFor.set(s.id, images[i % images.length]));
   }
 
   let cursor = 0;
+  let imgIndex = 0;
   const visuals: SceneVisual[] = scenes.map((scene) => {
-    ctx.font = `600 ${titleSize}px ${DISPLAY_FONT}`;
+    ctx.font = `800 ${titleSize}px ${FONT}`;
     const titleLines = wrapText(ctx, scene.title, textWidth, 3);
-    ctx.font = `400 ${descSize}px ${BODY_FONT}`;
+    ctx.font = `400 ${descSize}px ${FONT}`;
     const descLines = wrapText(ctx, scene.description, textWidth, 3);
-    ctx.font = `500 ${subSize}px ${BODY_FONT}`;
+    ctx.font = `500 ${subSize}px ${FONT}`;
     const subtitleLines = scene.voiceOver.trim()
       ? wrapText(ctx, scene.voiceOver.trim(), width - margin * 2 - 80 * u, 2)
       : [];
 
     const img = imageFor.get(scene.id);
+    let mode: SceneMode;
+    if (scene.role === "intro") mode = "intro";
+    else if (scene.role === "cta") mode = "cta";
+    else if (img) {
+      mode = imgIndex % 2 === 0 ? "float" : "spotlight";
+      imgIndex += 1;
+    } else if (scene.role === "benefices") mode = "stats";
+    else mode = "mock";
+
     const v: SceneVisual = {
       scene,
       start: cursor,
@@ -210,21 +276,16 @@ export function precomputeTimeline(
       subtitleLines,
       image: img?.source,
       imageAspect: img?.aspect,
+      mode,
     };
     cursor += scene.durationSeconds;
     return v;
   });
 
-  return {
-    project,
-    visuals,
-    totalSeconds: cursor,
-    stacked,
-    u,
-  };
+  return { project, visuals, totalSeconds: cursor, stacked, u, accent };
 }
 
-/* ── Primitives de dessin ──────────────────────────────────────── */
+/* ── Primitives ────────────────────────────────────────────────── */
 
 function roundRect(
   ctx: CanvasRenderingContext2D,
@@ -234,7 +295,7 @@ function roundRect(
   h: number,
   r: number
 ) {
-  const rr = Math.min(r, w / 2, h / 2);
+  const rr = Math.max(0, Math.min(r, w / 2, h / 2));
   ctx.beginPath();
   ctx.moveTo(x + rr, y);
   ctx.arcTo(x + w, y, x + w, y + h, rr);
@@ -244,193 +305,86 @@ function roundRect(
   ctx.closePath();
 }
 
+function accentGradient(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  w: number,
+  accent: { a1: string; a2: string }
+) {
+  const g = ctx.createLinearGradient(x, y, x + w, y);
+  g.addColorStop(0, accent.a1);
+  g.addColorStop(1, accent.a2);
+  return g;
+}
+
 function drawBackground(
   ctx: CanvasRenderingContext2D,
   w: number,
   h: number,
   t: number,
-  u: number
+  accent: { a1: string; a2: string }
 ) {
-  // Dégradé chaud qui respire lentement.
-  const shift = (Math.sin(t * 0.25) + 1) / 2;
-  const g = ctx.createLinearGradient(0, 0, w, h);
-  g.addColorStop(0, PALETTE.ivory);
-  g.addColorStop(lerp(0.45, 0.65, shift), PALETTE.cream);
-  g.addColorStop(1, PALETTE.creamDeep);
+  const g = ctx.createLinearGradient(0, 0, 0, h);
+  g.addColorStop(0, THEME.bg1);
+  g.addColorStop(1, THEME.bg0);
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, w, h);
 
-  // Points flottants (parallaxe douce).
-  const rand = seeded(7);
+  // Halos de la couleur du produit qui dérivent lentement.
+  const blobs = [
+    { cx: 0.22, cy: 0.24, col: accent.a1, sp: 0.18 },
+    { cx: 0.82, cy: 0.72, col: accent.a2, sp: 0.13 },
+  ];
+  for (const b of blobs) {
+    const bx = w * (b.cx + Math.sin(t * b.sp) * 0.05);
+    const by = h * (b.cy + Math.cos(t * b.sp * 1.3) * 0.05);
+    const rad = Math.max(w, h) * 0.5;
+    const rg = ctx.createRadialGradient(bx, by, 0, bx, by, rad);
+    rg.addColorStop(0, hexA(b.col, 0.22));
+    rg.addColorStop(1, hexA(b.col, 0));
+    ctx.fillStyle = rg;
+    ctx.fillRect(0, 0, w, h);
+  }
+
+  // Grain d'étoiles discrètes.
+  const rand = seeded(11);
   ctx.save();
-  for (let i = 0; i < 20; i++) {
-    const bx = rand() * w;
-    const by = rand() * h;
-    const rad = (2 + rand() * 4) * u;
-    const drift = Math.sin(t * 0.5 + i) * 14 * u;
-    ctx.globalAlpha = 0.05 + rand() * 0.06;
-    ctx.fillStyle = i % 2 ? PALETTE.bronze : PALETTE.caramel;
+  for (let i = 0; i < 22; i++) {
+    const x = rand() * w;
+    const y = rand() * h;
+    ctx.globalAlpha = 0.05 + rand() * 0.08;
+    ctx.fillStyle = "#FFFFFF";
     ctx.beginPath();
-    ctx.arc(bx + drift, by + Math.cos(t * 0.4 + i) * 10 * u, rad, 0, Math.PI * 2);
+    ctx.arc(x, y, rand() * 1.6 + 0.4, 0, Math.PI * 2);
     ctx.fill();
   }
   ctx.restore();
 
-  // Halo bronze mobile pour donner de la profondeur.
-  const hx = w * (0.7 + Math.sin(t * 0.3) * 0.08);
-  const hy = h * (0.35 + Math.cos(t * 0.22) * 0.06);
-  const halo = ctx.createRadialGradient(hx, hy, 0, hx, hy, Math.max(w, h) * 0.55);
-  halo.addColorStop(0, "rgba(185,133,77,0.16)");
-  halo.addColorStop(1, "rgba(185,133,77,0)");
-  ctx.fillStyle = halo;
+  // Vignette
+  const vig = ctx.createRadialGradient(
+    w / 2,
+    h / 2,
+    Math.min(w, h) * 0.3,
+    w / 2,
+    h / 2,
+    Math.max(w, h) * 0.75
+  );
+  vig.addColorStop(0, "rgba(0,0,0,0)");
+  vig.addColorStop(1, "rgba(0,0,0,0.5)");
+  ctx.fillStyle = vig;
   ctx.fillRect(0, 0, w, h);
 }
 
-function drawTopBar(
-  ctx: CanvasRenderingContext2D,
-  project: VideoProject,
-  visual: SceneVisual,
-  total: number,
-  w: number,
-  u: number,
-  margin: number
-) {
-  ctx.textBaseline = "alphabetic";
-  ctx.textAlign = "left";
-  ctx.fillStyle = PALETTE.bronzeDeep;
-  ctx.font = `700 ${Math.round(26 * u)}px ${BODY_FONT}`;
-  ctx.fillText(project.productName.toUpperCase(), margin, margin * 0.7);
-
-  ctx.textAlign = "right";
-  ctx.fillStyle = PALETTE.warmGray;
-  ctx.font = `600 ${Math.round(24 * u)}px ${BODY_FONT}`;
-  ctx.fillText(
-    `${String(visual.scene.order).padStart(2, "0")} / ${String(total).padStart(2, "0")}`,
-    w - margin,
-    margin * 0.7
-  );
-  ctx.textAlign = "left";
+function hexA(hex: string, a: number): string {
+  const h = hex.replace("#", "");
+  const r = parseInt(h.slice(0, 2), 16);
+  const g = parseInt(h.slice(2, 4), 16);
+  const b = parseInt(h.slice(4, 6), 16);
+  return `rgba(${r},${g},${b},${a})`;
 }
 
-/** Mock d'interface animé : donne un vrai sentiment de « logiciel en action ». */
-function drawMockUI(
-  ctx: CanvasRenderingContext2D,
-  x: number,
-  y: number,
-  w: number,
-  h: number,
-  t: number,
-  local: number,
-  u: number
-) {
-  const appear = easeOutCubic(clamp(local / 0.6));
-  ctx.save();
-  ctx.globalAlpha = appear;
-  const oy = y + (1 - appear) * 40 * u;
-
-  // Ombre portée
-  ctx.save();
-  ctx.shadowColor = "rgba(24,17,12,0.18)";
-  ctx.shadowBlur = 40 * u;
-  ctx.shadowOffsetY = 24 * u;
-  ctx.fillStyle = PALETTE.ivory;
-  roundRect(ctx, x, oy, w, h, 20 * u);
-  ctx.fill();
-  ctx.restore();
-
-  // Cadre
-  ctx.strokeStyle = "rgba(154,106,58,0.22)";
-  ctx.lineWidth = 1.5 * u;
-  roundRect(ctx, x, oy, w, h, 20 * u);
-  ctx.stroke();
-
-  // Barre de fenêtre + pastilles
-  const barH = 44 * u;
-  ctx.fillStyle = PALETTE.cream;
-  roundRect(ctx, x, oy, w, barH, 20 * u);
-  ctx.fill();
-  ctx.fillRect(x, oy + barH - 20 * u, w, 20 * u);
-  const dots = [PALETTE.caramel, PALETTE.bronze, PALETTE.bronzeDeep];
-  for (let i = 0; i < 3; i++) {
-    ctx.fillStyle = dots[i];
-    ctx.globalAlpha = appear * 0.8;
-    ctx.beginPath();
-    ctx.arc(x + 26 * u + i * 24 * u, oy + barH / 2, 6 * u, 0, Math.PI * 2);
-    ctx.fill();
-  }
-  ctx.globalAlpha = appear;
-
-  // Zone de contenu : sidebar + cartes qui apparaissent en cascade
-  const pad = 22 * u;
-  const contentY = oy + barH + pad;
-  const sidebarW = w * 0.26;
-
-  // Sidebar
-  ctx.fillStyle = "rgba(154,106,58,0.06)";
-  roundRect(ctx, x + pad, contentY, sidebarW - pad, h - barH - pad * 2, 12 * u);
-  ctx.fill();
-  const navCount = 4;
-  const activeNav = Math.floor(t * 0.8) % navCount;
-  for (let i = 0; i < navCount; i++) {
-    const ny = contentY + 18 * u + i * 40 * u;
-    if (i === activeNav) {
-      ctx.fillStyle = "rgba(154,106,58,0.16)";
-      roundRect(ctx, x + pad + 8 * u, ny - 10 * u, sidebarW - pad - 16 * u, 32 * u, 8 * u);
-      ctx.fill();
-    }
-    ctx.fillStyle = i === activeNav ? PALETTE.bronzeDeep : "rgba(140,129,120,0.5)";
-    roundRect(ctx, x + pad + 18 * u, ny, (sidebarW - pad) * 0.55, 8 * u, 4 * u);
-    ctx.fill();
-  }
-
-  // Cartes / lignes de contenu
-  const mainX = x + sidebarW + pad * 0.5;
-  const mainW = w - sidebarW - pad * 1.5;
-  const rows = 4;
-  for (let i = 0; i < rows; i++) {
-    const rowAppear = easeOutCubic(clamp((local - 0.3 - i * 0.14) / 0.5));
-    if (rowAppear <= 0) continue;
-    ctx.globalAlpha = appear * rowAppear;
-    const ry = contentY + i * 62 * u + (1 - rowAppear) * 16 * u;
-    const highlighted = i === Math.floor(t * 0.6) % rows;
-    ctx.fillStyle = highlighted ? "rgba(154,106,58,0.10)" : "rgba(24,17,12,0.03)";
-    roundRect(ctx, mainX, ry, mainW - pad, 48 * u, 10 * u);
-    ctx.fill();
-    // pastille + barres
-    ctx.fillStyle = highlighted ? PALETTE.bronze : "rgba(154,106,58,0.35)";
-    ctx.beginPath();
-    ctx.arc(mainX + 22 * u, ry + 24 * u, 10 * u, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = "rgba(24,17,12,0.28)";
-    roundRect(ctx, mainX + 44 * u, ry + 14 * u, mainW * 0.4, 8 * u, 4 * u);
-    ctx.fill();
-    ctx.fillStyle = "rgba(24,17,12,0.14)";
-    roundRect(ctx, mainX + 44 * u, ry + 28 * u, mainW * 0.6, 7 * u, 4 * u);
-    ctx.fill();
-  }
-  ctx.globalAlpha = appear;
-
-  // Curseur qui se déplace vers la ligne active
-  const targetRow = Math.floor(t * 0.6) % rows;
-  const cx = mainX + mainW * 0.5 + Math.sin(t * 1.4) * 20 * u;
-  const cy = contentY + targetRow * 62 * u + 24 * u;
-  ctx.fillStyle = PALETTE.coffee;
-  ctx.beginPath();
-  ctx.moveTo(cx, cy);
-  ctx.lineTo(cx, cy + 22 * u);
-  ctx.lineTo(cx + 6 * u, cy + 16 * u);
-  ctx.lineTo(cx + 14 * u, cy + 24 * u);
-  ctx.lineTo(cx + 18 * u, cy + 20 * u);
-  ctx.lineTo(cx + 10 * u, cy + 12 * u);
-  ctx.lineTo(cx + 16 * u, cy + 8 * u);
-  ctx.closePath();
-  ctx.fill();
-
-  ctx.restore();
-}
-
-/** Capture réelle animée (Ken Burns) dans un cadre de fenêtre. */
-function drawKenBurns(
+function drawImageCover(
   ctx: CanvasRenderingContext2D,
   img: CanvasImageSource,
   aspect: number,
@@ -438,94 +392,337 @@ function drawKenBurns(
   y: number,
   w: number,
   h: number,
+  zoom = 1,
+  panX = 0,
+  panY = 0
+) {
+  const viewAspect = w / h;
+  let dw = w * zoom;
+  let dh = h * zoom;
+  if (aspect > viewAspect) dw = dh * aspect;
+  else dh = dw / aspect;
+  const dx = x + (w - dw) / 2 + panX * w;
+  const dy = y + (h - dh) / 2 + panY * h;
+  ctx.drawImage(img, dx, dy, dw, dh);
+}
+
+function drawCursor(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  s: number,
+  clickT: number
+) {
+  // Halo de clic
+  if (clickT > 0) {
+    const p = easeOutCubic(clickT);
+    ctx.save();
+    ctx.globalAlpha = (1 - p) * 0.5;
+    ctx.strokeStyle = "#FFFFFF";
+    ctx.lineWidth = 3 * s;
+    ctx.beginPath();
+    ctx.arc(x, y, 8 * s + p * 34 * s, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+  }
+  const press = clickT > 0 && clickT < 0.5 ? 0.88 : 1;
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.scale(s * press, s * press);
+  ctx.shadowColor = "rgba(0,0,0,0.5)";
+  ctx.shadowBlur = 8;
+  ctx.shadowOffsetY = 3;
+  ctx.beginPath();
+  ctx.moveTo(0, 0);
+  ctx.lineTo(0, 30);
+  ctx.lineTo(8, 22);
+  ctx.lineTo(14, 34);
+  ctx.lineTo(19, 32);
+  ctx.lineTo(13, 20);
+  ctx.lineTo(22, 20);
+  ctx.closePath();
+  ctx.fillStyle = "#FFFFFF";
+  ctx.fill();
+  ctx.shadowColor = "transparent";
+  ctx.lineWidth = 2.5;
+  ctx.strokeStyle = "#1A1A22";
+  ctx.stroke();
+  ctx.restore();
+}
+
+/* ── Modes visuels ─────────────────────────────────────────────── */
+
+function drawFloating(
+  ctx: CanvasRenderingContext2D,
+  visual: SceneVisual,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
   t: number,
   local: number,
-  u: number
+  u: number,
+  accent: { a1: string; a2: string }
 ) {
   const appear = easeOutCubic(clamp(local / 0.6));
-  ctx.save();
-  ctx.globalAlpha = appear;
-  const oy = y + (1 - appear) * 40 * u;
+  const bob = Math.sin(t * 1.1) * 8 * u;
+  const tilt = lerp(0.05, 0.02, appear);
+  const cx = x + w / 2;
+  const cy = y + h / 2 + (1 - appear) * 50 * u + bob;
 
   ctx.save();
-  ctx.shadowColor = "rgba(24,17,12,0.22)";
-  ctx.shadowBlur = 44 * u;
-  ctx.shadowOffsetY = 26 * u;
-  ctx.fillStyle = PALETTE.ivory;
-  roundRect(ctx, x, oy, w, h, 18 * u);
+  ctx.globalAlpha = appear;
+  ctx.translate(cx, cy);
+  ctx.rotate(-tilt);
+  ctx.scale(lerp(0.94, 1, appear), lerp(0.94, 1, appear));
+  ctx.translate(-w / 2, -h / 2);
+
+  // Glow accent derrière la carte
+  ctx.save();
+  ctx.shadowColor = hexA(accent.a1, 0.55);
+  ctx.shadowBlur = 60 * u;
+  ctx.shadowOffsetY = 20 * u;
+  ctx.fillStyle = THEME.card;
+  roundRect(ctx, 0, 0, w, h, 18 * u);
   ctx.fill();
   ctx.restore();
 
   const barH = 40 * u;
-  ctx.fillStyle = PALETTE.cream;
-  roundRect(ctx, x, oy, w, barH, 18 * u);
-  ctx.fill();
-  ctx.fillRect(x, oy + barH - 18 * u, w, 18 * u);
-  const dots = [PALETTE.caramel, PALETTE.bronze, PALETTE.bronzeDeep];
-  for (let i = 0; i < 3; i++) {
-    ctx.fillStyle = dots[i];
-    ctx.beginPath();
-    ctx.arc(x + 24 * u + i * 22 * u, oy + barH / 2, 5.5 * u, 0, Math.PI * 2);
-    ctx.fill();
-  }
+  windowChromeScaled(ctx, 0, 0, w, barH, u);
 
-  // Image en cover avec zoom/pan lents
-  const viewX = x + 6 * u;
-  const viewY = oy + barH;
-  const viewW = w - 12 * u;
-  const viewH = h - barH - 6 * u;
+  // Contenu : image réelle, ou faux tableau de bord
   ctx.save();
-  roundRect(ctx, viewX, viewY, viewW, viewH, 8 * u);
+  roundRect(ctx, 6 * u, barH, w - 12 * u, h - barH - 6 * u, 10 * u);
   ctx.clip();
-
-  const zoom = lerp(1.04, 1.14, easeInOutCubic((Math.sin(t * 0.25) + 1) / 2));
-  const panX = Math.sin(t * 0.2) * 0.03;
-  const panY = Math.cos(t * 0.18) * 0.03;
-  const viewAspect = viewW / viewH;
-  let dw = viewW * zoom;
-  let dh = viewH * zoom;
-  if (aspect > viewAspect) dw = dh * aspect;
-  else dh = dw / aspect;
-  const dx = viewX + (viewW - dw) / 2 + panX * viewW;
-  const dy = viewY + (viewH - dh) / 2 + panY * viewH;
-  ctx.drawImage(img, dx, dy, dw, dh);
+  if (visual.image) {
+    const zoom = lerp(1.05, 1.12, easeInOutCubic((Math.sin(t * 0.3) + 1) / 2));
+    drawImageCover(
+      ctx,
+      visual.image,
+      visual.imageAspect ?? 16 / 9,
+      6 * u,
+      barH,
+      w - 12 * u,
+      h - barH - 6 * u,
+      zoom,
+      Math.sin(t * 0.22) * 0.02,
+      0
+    );
+  } else {
+    drawFakeDashboard(ctx, 6 * u, barH, w - 12 * u, h - barH - 6 * u, t, local, u, accent);
+  }
   ctx.restore();
 
+  // Bord lumineux
+  ctx.strokeStyle = THEME.hairline;
+  ctx.lineWidth = 1.5 * u;
+  roundRect(ctx, 0, 0, w, h, 18 * u);
+  ctx.stroke();
+  ctx.restore();
+
+  // Curseur qui vient cliquer un bouton de la carte
+  const clickCycle = (t % 3) / 3;
+  const cursorAppear = easeOutCubic(clamp((local - 0.5) / 0.5));
+  if (cursorAppear > 0) {
+    const targetX = cx + w * 0.16;
+    const targetY = cy + h * 0.18 + bob;
+    const startX = cx + w * 0.42;
+    const startY = cy + h * 0.42;
+    const move = easeInOutCubic(clamp(clickCycle / 0.5));
+    const px = lerp(startX, targetX, move);
+    const py = lerp(startY, targetY, move);
+    const clickT = clickCycle > 0.5 ? clamp((clickCycle - 0.5) / 0.35) : 0;
+    ctx.globalAlpha = cursorAppear;
+    drawCursor(ctx, px, py, 1.5 * u, clickT);
+    ctx.globalAlpha = 1;
+  }
+}
+
+function windowChromeScaled(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  w: number,
+  barH: number,
+  u: number
+) {
+  ctx.fillStyle = THEME.cardBar;
+  roundRect(ctx, x, y, w, barH, 16 * u);
+  ctx.fill();
+  ctx.fillRect(x, y + barH - 16 * u, w, 16 * u);
+  const cols = ["#ff5f57", "#febc2e", "#28c840"];
+  for (let i = 0; i < 3; i++) {
+    ctx.fillStyle = cols[i];
+    ctx.beginPath();
+    ctx.arc(x + 22 * u + i * 20 * u, y + barH / 2, 5.5 * u, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+function drawFakeDashboard(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  t: number,
+  local: number,
+  u: number,
+  accent: { a1: string; a2: string }
+) {
+  ctx.fillStyle = "#0F0F17";
+  ctx.fillRect(x, y, w, h);
+  const pad = 20 * u;
+  const sidebarW = w * 0.24;
+  ctx.fillStyle = "rgba(255,255,255,0.04)";
+  ctx.fillRect(x, y, sidebarW, h);
+  const activeNav = Math.floor(t * 0.8) % 4;
+  for (let i = 0; i < 4; i++) {
+    const ny = y + pad + i * 42 * u;
+    if (i === activeNav) {
+      ctx.fillStyle = hexA(accent.a1, 0.25);
+      roundRect(ctx, x + 10 * u, ny - 8 * u, sidebarW - 20 * u, 30 * u, 8 * u);
+      ctx.fill();
+    }
+    ctx.fillStyle = i === activeNav ? accent.a1 : "rgba(255,255,255,0.22)";
+    roundRect(ctx, x + 20 * u, ny, sidebarW * 0.5, 8 * u, 4 * u);
+    ctx.fill();
+  }
+  const mainX = x + sidebarW + pad;
+  const mainW = w - sidebarW - pad * 2;
+  for (let i = 0; i < 4; i++) {
+    const rowAppear = easeOutCubic(clamp((local - 0.2 - i * 0.12) / 0.5));
+    if (rowAppear <= 0) continue;
+    ctx.globalAlpha = rowAppear;
+    const ry = y + pad + i * 58 * u;
+    const hot = i === Math.floor(t * 0.6) % 4;
+    ctx.fillStyle = hot ? hexA(accent.a1, 0.14) : "rgba(255,255,255,0.05)";
+    roundRect(ctx, mainX, ry, mainW, 46 * u, 10 * u);
+    ctx.fill();
+    ctx.fillStyle = hot ? accent.a2 : "rgba(255,255,255,0.3)";
+    ctx.beginPath();
+    ctx.arc(mainX + 22 * u, ry + 23 * u, 9 * u, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "rgba(255,255,255,0.5)";
+    roundRect(ctx, mainX + 42 * u, ry + 14 * u, mainW * 0.4, 7 * u, 4 * u);
+    ctx.fill();
+    ctx.fillStyle = "rgba(255,255,255,0.22)";
+    roundRect(ctx, mainX + 42 * u, ry + 27 * u, mainW * 0.6, 6 * u, 3 * u);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+}
+
+function drawSpotlight(
+  ctx: CanvasRenderingContext2D,
+  visual: SceneVisual,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  t: number,
+  local: number,
+  u: number,
+  accent: { a1: string; a2: string }
+) {
+  const appear = easeOutCubic(clamp(local / 0.5));
+  ctx.save();
+  ctx.globalAlpha = appear;
+
+  ctx.save();
+  ctx.shadowColor = hexA(accent.a2, 0.5);
+  ctx.shadowBlur = 60 * u;
+  ctx.shadowOffsetY = 18 * u;
+  ctx.fillStyle = THEME.card;
+  roundRect(ctx, x, y, w, h, 18 * u);
+  ctx.fill();
+  ctx.restore();
+
+  const barH = 40 * u;
+  windowChromeScaled(ctx, x, y, w, barH, u);
+
+  ctx.save();
+  roundRect(ctx, x + 6 * u, y + barH, w - 12 * u, h - barH - 6 * u, 10 * u);
+  ctx.clip();
+  const vx = x + 6 * u;
+  const vy = y + barH;
+  const vw = w - 12 * u;
+  const vh = h - barH - 6 * u;
+  if (visual.image) {
+    drawImageCover(ctx, visual.image, visual.imageAspect ?? 16 / 9, vx, vy, vw, vh, 1.02);
+  } else {
+    drawFakeDashboard(ctx, vx, vy, vw, vh, t, local, u, accent);
+  }
+
+  // Spotlight : le focus se déplace lentement d'un point à un autre.
+  const prog = easeInOutCubic(clamp((local - 0.4) / Math.max(1, visual.end - visual.start - 1)));
+  const fx = vx + vw * lerp(0.32, 0.7, prog);
+  const fy = vy + vh * lerp(0.4, 0.62, prog);
+  const rad = Math.min(vw, vh) * 0.42;
+  const dim = ctx.createRadialGradient(fx, fy, rad * 0.35, fx, fy, rad * 1.6);
+  dim.addColorStop(0, "rgba(7,7,13,0)");
+  dim.addColorStop(1, "rgba(7,7,13,0.82)");
+  ctx.fillStyle = dim;
+  ctx.fillRect(vx, vy, vw, vh);
+
+  // Anneau d'accent autour du focus
+  ctx.strokeStyle = hexA(accent.a1, 0.9 * appear);
+  ctx.lineWidth = 3 * u;
+  ctx.beginPath();
+  ctx.arc(fx, fy, rad * 0.9, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.restore();
+
+  ctx.strokeStyle = THEME.hairline;
+  ctx.lineWidth = 1.5 * u;
+  roundRect(ctx, x, y, w, h, 18 * u);
+  ctx.stroke();
+
+  // Curseur vers le focus
+  const cursorAppear = easeOutCubic(clamp((local - 0.6) / 0.5));
+  if (cursorAppear > 0) {
+    const prog2 = easeInOutCubic(clamp((local - 0.4) / Math.max(1, visual.end - visual.start - 1)));
+    const fx2 = x + 6 * u + (w - 12 * u) * lerp(0.32, 0.7, prog2);
+    const fy2 = y + barH + (h - barH - 6 * u) * lerp(0.4, 0.62, prog2);
+    const clickT = (t % 2.5) / 2.5 > 0.6 ? clamp(((t % 2.5) / 2.5 - 0.6) / 0.3) : 0;
+    ctx.globalAlpha = cursorAppear;
+    drawCursor(ctx, fx2, fy2, 1.5 * u, clickT);
+  }
   ctx.restore();
 }
 
-/** Barres animées pour la scène "bénéfices". */
-function drawBars(
+function drawStats(
   ctx: CanvasRenderingContext2D,
   x: number,
   y: number,
   w: number,
   h: number,
   local: number,
-  u: number
+  u: number,
+  accent: { a1: string; a2: string }
 ) {
-  const heights = [0.55, 0.8, 0.65, 1.0];
-  const gap = 24 * u;
+  const heights = [0.5, 0.72, 0.62, 1.0];
+  const gap = 22 * u;
   const barW = (w - gap * (heights.length - 1)) / heights.length;
   for (let i = 0; i < heights.length; i++) {
     const grow = easeOutCubic(clamp((local - 0.3 - i * 0.12) / 0.7));
     const bh = h * heights[i] * grow;
     const bx = x + i * (barW + gap);
     const by = y + h - bh;
-    const g = ctx.createLinearGradient(0, by, 0, by + bh);
-    g.addColorStop(0, PALETTE.caramel);
-    g.addColorStop(1, PALETTE.bronzeDeep);
+    const g = ctx.createLinearGradient(0, by + bh, 0, by);
+    g.addColorStop(0, accent.a2);
+    g.addColorStop(1, accent.a1);
+    ctx.save();
+    ctx.shadowColor = hexA(accent.a1, 0.5);
+    ctx.shadowBlur = 24 * u;
     ctx.fillStyle = g;
     roundRect(ctx, bx, by, barW, bh, 10 * u);
     ctx.fill();
-    // reflet
-    ctx.fillStyle = "rgba(255,253,248,0.25)";
-    roundRect(ctx, bx + 6 * u, by + 8 * u, barW * 0.3, Math.max(0, bh - 16 * u), 6 * u);
-    ctx.fill();
+    ctx.restore();
   }
 }
 
-/* ── Rendu d'une image de la timeline ──────────────────────────── */
+/* ── Frame ─────────────────────────────────────────────────────── */
 
 export function drawSceneFrame(
   ctx: CanvasRenderingContext2D,
@@ -534,10 +731,10 @@ export function drawSceneFrame(
   w: number,
   h: number
 ) {
-  const { u, stacked, project, visuals, totalSeconds } = pre;
-  const margin = 92 * u;
+  const { u, stacked, project, visuals, totalSeconds, accent } = pre;
+  const margin = 96 * u;
 
-  drawBackground(ctx, w, h, time, u);
+  drawBackground(ctx, w, h, time, accent);
 
   const visual =
     visuals.find((v) => time >= v.start && time < v.end) ??
@@ -546,57 +743,63 @@ export function drawSceneFrame(
   const remaining = visual.end - time;
   const scene = visual.scene;
 
-  drawTopBar(ctx, project, visual, visuals.length, w, u, margin);
+  // Top bar
+  ctx.textBaseline = "alphabetic";
+  ctx.textAlign = "left";
+  ctx.fillStyle = "rgba(255,255,255,0.55)";
+  ctx.font = `700 ${Math.round(24 * u)}px ${FONT}`;
+  ctx.fillText(project.productName.toUpperCase(), margin, margin * 0.66);
+  ctx.textAlign = "right";
+  ctx.fillStyle = "rgba(255,255,255,0.32)";
+  ctx.font = `600 ${Math.round(22 * u)}px ${FONT}`;
+  ctx.fillText(
+    `${String(scene.order).padStart(2, "0")} / ${String(visuals.length).padStart(2, "0")}`,
+    w - margin,
+    margin * 0.66
+  );
+  ctx.textAlign = "left";
 
-  const isIntro = scene.role === "intro";
-  const isCta = scene.role === "cta";
-  const isBenefices = scene.role === "benefices";
-
-  // Sortie de scène : léger glissement + fondu sur les 0,4 dernières secondes.
   const exit = clamp(remaining / 0.4);
-  const exitShift = (1 - exit) * -50 * u;
 
-  if (isIntro) {
+  if (visual.mode === "intro") {
     drawIntro(ctx, pre, visual, local, w, h, margin);
-  } else if (isCta) {
+  } else if (visual.mode === "cta") {
     drawCta(ctx, pre, visual, local, time, w, h, margin);
   } else {
-    // Layout standard : texte + visuel (mock UI ou capture).
+    // Texte
     const textX = margin;
-    const textTop = stacked ? margin * 1.9 : h * 0.28;
-
+    const textTop = stacked ? margin * 1.7 : h * 0.26;
     ctx.save();
     ctx.globalAlpha = exit;
-    ctx.translate(exitShift, 0);
 
-    // Étiquette de rôle avec trait animé
     const tagAppear = easeOutCubic(clamp(local / 0.4));
     ctx.globalAlpha = exit * tagAppear;
-    ctx.fillStyle = PALETTE.bronze;
-    ctx.font = `700 ${Math.round(26 * u)}px ${BODY_FONT}`;
-    ctx.textAlign = "left";
-    ctx.textBaseline = "alphabetic";
+    ctx.fillStyle = accent.a1;
+    ctx.font = `700 ${Math.round(24 * u)}px ${FONT}`;
     ctx.fillText(ROLE_LABELS[scene.role].toUpperCase(), textX, textTop);
-    ctx.fillStyle = PALETTE.bronze;
-    ctx.fillRect(textX, textTop + 14 * u, 70 * u * tagAppear, 4 * u);
+    ctx.fillStyle = accentGradient(ctx, textX, 0, 80 * u, accent);
+    ctx.fillRect(textX, textTop + 14 * u, 72 * u * tagAppear, 4 * u);
 
-    // Titre : lignes qui montent en cascade
-    ctx.fillStyle = PALETTE.coffee;
-    const titleSize = Math.round((stacked ? 68 : 76) * u);
-    ctx.font = `600 ${titleSize}px ${DISPLAY_FONT}`;
-    let ty = textTop + 62 * u;
+    const titleSize = Math.round((stacked ? 74 : 82) * u);
+    ctx.font = `800 ${titleSize}px ${FONT}`;
+    let ty = textTop + 66 * u;
+    const lastLine = visual.titleLines.length - 1;
     visual.titleLines.forEach((line, i) => {
-      const lp = easeOutCubic(clamp((local - 0.15 - i * 0.12) / 0.5));
+      const lp = easeOutCubic(clamp((local - 0.12 - i * 0.12) / 0.5));
       ctx.globalAlpha = exit * lp;
-      ctx.fillText(line, textX, ty + (1 - lp) * 30 * u);
-      ty += titleSize * 1.12;
+      // Dernière ligne surlignée en dégradé accent (typo cinétique).
+      ctx.fillStyle =
+        i === lastLine
+          ? accentGradient(ctx, textX, 0, ctx.measureText(line).width || 300 * u, accent)
+          : THEME.textHi;
+      ctx.fillText(line, textX, ty + (1 - lp) * 28 * u);
+      ty += titleSize * 1.1;
     });
 
-    // Description : lignes en fondu décalé
-    ctx.fillStyle = PALETTE.warmGray;
-    const descSize = Math.round(34 * u);
-    ctx.font = `400 ${descSize}px ${BODY_FONT}`;
-    let dy = ty + 18 * u;
+    ctx.fillStyle = THEME.textLo;
+    const descSize = Math.round(33 * u);
+    ctx.font = `400 ${descSize}px ${FONT}`;
+    let dy = ty + 16 * u;
     visual.descLines.forEach((line, i) => {
       const lp = easeOutCubic(clamp((local - 0.5 - i * 0.1) / 0.5));
       ctx.globalAlpha = exit * lp;
@@ -605,55 +808,49 @@ export function drawSceneFrame(
     });
     ctx.restore();
 
-    // Visuel à droite (paysage) ou en bas (portrait)
+    // Visuel
     let vx: number, vy: number, vw: number, vh: number;
     if (stacked) {
       vw = w - margin * 2;
-      vh = h * 0.3;
+      vh = h * 0.32;
       vx = margin;
-      vy = h * 0.44;
+      vy = h * 0.46;
     } else {
-      vw = w * 0.42;
-      vh = h * 0.52;
+      vw = w * 0.44;
+      vh = h * 0.56;
       vx = w - vw - margin;
-      vy = h * 0.24;
+      vy = h * 0.22;
     }
     ctx.save();
     ctx.globalAlpha = exit;
-    ctx.translate(-exitShift * 0.6, 0);
-    if (isBenefices && !visual.image) {
-      // Encadré + barres animées
+    if (visual.mode === "float") drawFloating(ctx, visual, vx, vy, vw, vh, time, local, u, accent);
+    else if (visual.mode === "spotlight")
+      drawSpotlight(ctx, visual, vx, vy, vw, vh, time, local, u, accent);
+    else if (visual.mode === "stats") {
       ctx.save();
-      ctx.shadowColor = "rgba(24,17,12,0.16)";
+      ctx.shadowColor = hexA(accent.a1, 0.3);
       ctx.shadowBlur = 40 * u;
-      ctx.shadowOffsetY = 22 * u;
-      ctx.fillStyle = PALETTE.ivory;
-      roundRect(ctx, vx, vy, vw, vh, 20 * u);
+      ctx.fillStyle = THEME.card;
+      roundRect(ctx, vx, vy, vw, vh, 18 * u);
       ctx.fill();
       ctx.restore();
-      drawBars(ctx, vx + 40 * u, vy + 50 * u, vw - 80 * u, vh - 100 * u, local, u);
-    } else if (visual.image) {
-      drawKenBurns(ctx, visual.image, visual.imageAspect ?? 16 / 9, vx, vy, vw, vh, time, local, u);
-    } else {
-      drawMockUI(ctx, vx, vy, vw, vh, time, local, u);
-    }
+      drawStats(ctx, vx + 40 * u, vy + 46 * u, vw - 80 * u, vh - 92 * u, local, u, accent);
+    } else drawFloating(ctx, visual, vx, vy, vw, vh, time, local, u, accent);
     ctx.restore();
   }
 
-  // Bande de sous-titres (voix off incrustée)
   if (visual.subtitleLines.length > 0) {
-    drawSubtitle(ctx, visual.subtitleLines, exit, w, h, u, margin);
+    drawSubtitle(ctx, visual.subtitleLines, exit, w, h, u, margin, accent);
   }
+  drawProgressBar(ctx, time, totalSeconds, w, h, u, margin, accent);
 
-  drawProgressBar(ctx, time, totalSeconds, w, h, u, margin);
-
-  // Balayage bronze à l'entrée de chaque scène (sauf la première).
-  if (visual.start > 0 && local < 0.45) {
-    const p = easeInOutCubic(clamp(local / 0.45));
+  // Balayage accent à l'entrée de scène
+  if (visual.start > 0 && local < 0.4) {
+    const p = easeInOutCubic(clamp(local / 0.4));
     ctx.save();
-    ctx.globalAlpha = (1 - p) * 0.9;
-    ctx.fillStyle = PALETTE.bronze;
-    ctx.fillRect(w * (p - 0.15), 0, w * 0.15, h);
+    ctx.globalAlpha = (1 - p) * 0.85;
+    ctx.fillStyle = accentGradient(ctx, w * (p - 0.12), 0, w * 0.12, accent);
+    ctx.fillRect(w * (p - 0.12), 0, w * 0.14, h);
     ctx.restore();
   }
 }
@@ -667,51 +864,43 @@ function drawIntro(
   h: number,
   margin: number
 ) {
-  const { u, project } = pre;
+  const { u, project, accent } = pre;
   const cx = margin;
-  const cy = h * 0.42;
+  const cy = h * 0.44;
 
-  // Voile assombri chic
-  ctx.save();
-  const veil = ctx.createLinearGradient(0, 0, w, 0);
-  veil.addColorStop(0, "rgba(24,17,12,0.06)");
-  veil.addColorStop(1, "rgba(24,17,12,0)");
-  ctx.fillStyle = veil;
-  ctx.fillRect(0, 0, w, h);
-  ctx.restore();
-
-  // Petit sur-titre
   const p0 = easeOutCubic(clamp(local / 0.5));
   ctx.globalAlpha = p0;
-  ctx.fillStyle = PALETTE.bronze;
-  ctx.font = `700 ${Math.round(28 * u)}px ${BODY_FONT}`;
+  ctx.fillStyle = accent.a1;
+  ctx.font = `700 ${Math.round(26 * u)}px ${FONT}`;
   ctx.textAlign = "left";
-  ctx.fillText("STUDIO ONE PRÉSENTE", cx, cy - 60 * u);
+  ctx.fillText("DÉMO PRODUIT", cx, cy - 64 * u);
 
-  // Nom du produit — grande révélation avec léger dépassement
   const p1 = easeOutBack(clamp((local - 0.15) / 0.7));
   ctx.save();
   ctx.globalAlpha = clamp((local - 0.15) / 0.4);
-  const nameSize = Math.round(120 * u);
-  ctx.font = `700 ${nameSize}px ${DISPLAY_FONT}`;
-  ctx.fillStyle = PALETTE.coffee;
-  ctx.translate(cx, cy + 60 * u);
+  const nameSize = Math.round(132 * u);
+  ctx.font = `800 ${nameSize}px ${FONT}`;
+  ctx.translate(cx, cy + 40 * u);
   ctx.scale(lerp(0.9, 1, p1), lerp(0.9, 1, p1));
+  ctx.fillStyle = accentGradient(
+    ctx,
+    0,
+    0,
+    ctx.measureText(project.productName).width || 400 * u,
+    accent
+  );
   ctx.fillText(project.productName, 0, 0);
   ctx.restore();
 
-  // Trait qui se déploie
   const p2 = easeInOutCubic(clamp((local - 0.6) / 0.6));
   ctx.globalAlpha = 1;
-  ctx.fillStyle = PALETTE.bronze;
-  ctx.fillRect(cx, cy + 100 * u, 420 * u * p2, 6 * u);
+  ctx.fillStyle = accentGradient(ctx, cx, 0, 460 * u, accent);
+  ctx.fillRect(cx, cy + 78 * u, 460 * u * p2, 6 * u);
 
-  // Accroche (description)
-  const p3 = easeOutCubic(clamp((local - 0.9) / 0.6));
-  ctx.globalAlpha = p3;
-  ctx.fillStyle = PALETTE.warmGray;
-  ctx.font = `400 ${Math.round(38 * u)}px ${BODY_FONT}`;
-  let dy = cy + 170 * u;
+  const p3 = clamp((local - 0.9) / 0.6);
+  ctx.fillStyle = THEME.textLo;
+  ctx.font = `400 ${Math.round(38 * u)}px ${FONT}`;
+  let dy = cy + 148 * u;
   visual.descLines.slice(0, 2).forEach((line, i) => {
     const lp = clamp((local - 0.9 - i * 0.12) / 0.5);
     ctx.globalAlpha = lp;
@@ -731,16 +920,17 @@ function drawCta(
   h: number,
   margin: number
 ) {
-  const { u, project } = pre;
-
-  // Panneau bronze plein pour finir en force
-  ctx.save();
+  const { u, project, accent } = pre;
   const p0 = easeInOutCubic(clamp(local / 0.5));
   const g = ctx.createLinearGradient(0, 0, w, h);
-  g.addColorStop(0, PALETTE.bronzeDeep);
-  g.addColorStop(1, PALETTE.bronze);
-  ctx.globalAlpha = p0 * 0.97;
+  g.addColorStop(0, accent.a1);
+  g.addColorStop(1, accent.a2);
+  ctx.save();
+  ctx.globalAlpha = p0;
   ctx.fillStyle = g;
+  ctx.fillRect(0, 0, w, h);
+  // léger voile sombre pour le contraste du texte
+  ctx.fillStyle = "rgba(7,7,13,0.18)";
   ctx.fillRect(0, 0, w, h);
   ctx.restore();
 
@@ -749,18 +939,17 @@ function drawCta(
 
   const p1 = easeOutCubic(clamp((local - 0.2) / 0.5));
   ctx.globalAlpha = p1;
-  ctx.fillStyle = "rgba(255,253,248,0.8)";
-  ctx.font = `700 ${Math.round(28 * u)}px ${BODY_FONT}`;
+  ctx.fillStyle = "rgba(255,255,255,0.85)";
+  ctx.font = `700 ${Math.round(28 * u)}px ${FONT}`;
   ctx.fillText(project.productName.toUpperCase(), cx, h * 0.34);
 
-  // Ligne d'appel (voix off du CTA ou titre)
-  const p2 = easeOutCubic(clamp((local - 0.35) / 0.6));
-  ctx.globalAlpha = p2;
-  ctx.fillStyle = PALETTE.ivory;
-  const ctaSize = Math.round(64 * u);
-  ctx.font = `600 ${ctaSize}px ${DISPLAY_FONT}`;
-  const lines = visual.titleLines.length ? visual.titleLines : [sceneCtaText(visual)];
-  let ty = h * 0.46;
+  const ctaSize = Math.round(70 * u);
+  ctx.font = `800 ${ctaSize}px ${FONT}`;
+  ctx.fillStyle = "#FFFFFF";
+  const lines = visual.titleLines.length
+    ? visual.titleLines
+    : [visual.scene.voiceOver.trim() || "Passez à l'action."];
+  let ty = h * 0.44;
   lines.forEach((line, i) => {
     const lp = clamp((local - 0.35 - i * 0.12) / 0.5);
     ctx.globalAlpha = lp;
@@ -768,33 +957,28 @@ function drawCta(
     ty += ctaSize * 1.15;
   });
 
-  // Bouton qui pulse
   const p3 = easeOutBack(clamp((local - 0.6) / 0.6));
   ctx.globalAlpha = clamp((local - 0.6) / 0.4);
   const pulse = 1 + Math.sin(time * 3) * 0.02;
-  const btnW = 380 * u * p3 * pulse;
-  const btnH = 92 * u * p3 * pulse;
+  const btnW = 400 * u * p3 * pulse;
+  const btnH = 96 * u * p3 * pulse;
   const bx = cx - btnW / 2;
-  const by = ty + 20 * u;
+  const by = ty + 26 * u;
   ctx.save();
-  ctx.shadowColor = "rgba(24,17,12,0.3)";
+  ctx.shadowColor = "rgba(0,0,0,0.4)";
   ctx.shadowBlur = 30 * u;
   ctx.shadowOffsetY = 14 * u;
-  ctx.fillStyle = PALETTE.ivory;
+  ctx.fillStyle = "#0B0B12";
   roundRect(ctx, bx, by, btnW, btnH, btnH / 2);
   ctx.fill();
   ctx.restore();
-  ctx.fillStyle = PALETTE.bronzeDeep;
-  ctx.font = `700 ${Math.round(30 * u)}px ${BODY_FONT}`;
+  ctx.fillStyle = "#FFFFFF";
+  ctx.font = `700 ${Math.round(30 * u)}px ${FONT}`;
   ctx.textBaseline = "middle";
   ctx.fillText("Essayer maintenant", cx, by + btnH / 2);
   ctx.textBaseline = "alphabetic";
   ctx.globalAlpha = 1;
   ctx.textAlign = "left";
-}
-
-function sceneCtaText(visual: SceneVisual): string {
-  return visual.scene.voiceOver.trim() || "Passez à l'action dès aujourd'hui.";
 }
 
 function drawSubtitle(
@@ -804,25 +988,30 @@ function drawSubtitle(
   w: number,
   h: number,
   u: number,
-  margin: number
+  margin: number,
+  accent: { a1: string; a2: string }
 ) {
   const lineHeight = 46 * u;
   const padY = 22 * u;
   const boxH = lines.length * lineHeight + padY * 2;
-  const boxBottom = h - 96 * u;
+  const boxBottom = h - 92 * u;
   const boxTop = boxBottom - boxH;
   const boxW = w - margin * 2;
 
   ctx.save();
-  ctx.globalAlpha = alpha * 0.92;
-  ctx.fillStyle = "rgba(24,17,12,0.82)";
+  ctx.globalAlpha = alpha * 0.9;
+  ctx.fillStyle = "rgba(10,10,18,0.7)";
   roundRect(ctx, margin, boxTop, boxW, boxH, 16 * u);
   ctx.fill();
+  ctx.strokeStyle = hexA(accent.a1, 0.4 * alpha);
+  ctx.lineWidth = 1.5 * u;
+  roundRect(ctx, margin, boxTop, boxW, boxH, 16 * u);
+  ctx.stroke();
   ctx.globalAlpha = alpha;
-  ctx.fillStyle = PALETTE.ivory;
-  ctx.font = `500 ${Math.round(32 * u)}px ${BODY_FONT}`;
+  ctx.fillStyle = "#FFFFFF";
+  ctx.font = `500 ${Math.round(32 * u)}px ${FONT}`;
   ctx.textAlign = "center";
-  let sy = boxTop + padY + lineHeight * 0.7;
+  let sy = boxTop + padY + lineHeight * 0.72;
   for (const line of lines) {
     ctx.fillText(line, w / 2, sy);
     sy += lineHeight;
@@ -838,31 +1027,20 @@ function drawProgressBar(
   w: number,
   h: number,
   u: number,
-  margin: number
+  margin: number,
+  accent: { a1: string; a2: string }
 ) {
-  // Règle pellicule
-  ctx.strokeStyle = "rgba(154,106,58,0.30)";
-  ctx.lineWidth = Math.max(1, 2 * u);
-  const tickY = h - 58 * u;
-  for (let x = margin; x <= w - margin; x += 26 * u) {
-    const major = Math.round((x - margin) / (26 * u)) % 5 === 0;
-    ctx.beginPath();
-    ctx.moveTo(x, tickY);
-    ctx.lineTo(x, tickY - (major ? 14 : 8) * u);
-    ctx.stroke();
-  }
-
-  const barY = h - 40 * u;
-  ctx.fillStyle = "rgba(154,106,58,0.18)";
-  roundRect(ctx, margin, barY, w - margin * 2, 6 * u, 3 * u);
+  const barY = h - 46 * u;
+  ctx.fillStyle = "rgba(255,255,255,0.12)";
+  roundRect(ctx, margin, barY, w - margin * 2, 5 * u, 3 * u);
   ctx.fill();
-  ctx.fillStyle = PALETTE.bronze;
-  roundRect(ctx, margin, barY, (w - margin * 2) * clamp(time / total), 6 * u, 3 * u);
+  ctx.fillStyle = accentGradient(ctx, margin, 0, w - margin * 2, accent);
+  roundRect(ctx, margin, barY, (w - margin * 2) * clamp(time / total), 5 * u, 3 * u);
   ctx.fill();
 
-  ctx.fillStyle = PALETTE.warmGray;
-  ctx.font = `400 ${Math.round(20 * u)}px ${BODY_FONT}`;
+  ctx.fillStyle = "rgba(255,255,255,0.35)";
+  ctx.font = `400 ${Math.round(20 * u)}px ${FONT}`;
   ctx.textAlign = "right";
-  ctx.fillText("Studio One", w - margin, h - 22 * u);
+  ctx.fillText("Studio One", w - margin, h - 24 * u);
   ctx.textAlign = "left";
 }
