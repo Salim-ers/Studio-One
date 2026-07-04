@@ -92,18 +92,31 @@ export async function generateVideoWithAudio(
 
   // ── Récupération audio (voix off + musique) en parallèle ─────────
   const durationMs = Math.round(totalSeconds * 1000);
+  let voiceErr: Error | null = null;
+  let musicErr: Error | null = null;
   const [voiceBuf, musicBuf] = await Promise.all([
     options.voiceoverText
-      ? fetchVoiceover(options.voiceoverText).catch(() => null)
+      ? fetchVoiceover(options.voiceoverText).catch((e) => {
+          voiceErr = e instanceof Error ? e : new Error(String(e));
+          return null;
+        })
       : Promise.resolve(null),
     options.musicPrompt
-      ? fetchMusic(options.musicPrompt, durationMs).catch(() => null)
+      ? fetchMusic(options.musicPrompt, durationMs).catch((e) => {
+          musicErr = e instanceof Error ? e : new Error(String(e));
+          return null;
+        })
       : Promise.resolve(null),
   ]);
 
-  if (options.voiceoverText && !voiceBuf && options.musicPrompt && !musicBuf) {
+  // Aucun élément audio disponible : on remonte la raison réelle (souvent le
+  // plan ElevenLabs) — l'appelant retombera alors sur la vidéo muette.
+  if (!voiceBuf && !musicBuf) {
+    const reason = (voiceErr as Error | null)?.message || (musicErr as Error | null)?.message;
     throw new Error(
-      "Génération audio impossible (voix off et musique). Vérifie ta clé ElevenLabs."
+      /paid|plan|402|payment/i.test(reason ?? "")
+        ? "Voix off et musique indisponibles : ton plan ElevenLabs (gratuit) ne permet pas l'API voix/musique."
+        : reason || "Génération audio impossible."
     );
   }
   onProgress(10);

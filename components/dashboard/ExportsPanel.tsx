@@ -23,6 +23,7 @@ interface VideoJob {
   status: "idle" | "working" | "done" | "error";
   progress: number;
   error?: string;
+  note?: string;
 }
 
 const VIDEO_DETAILS: Record<ExportFormat, string> = {
@@ -88,20 +89,42 @@ export function ExportsPanel({ project }: { project: VideoProject }) {
       const clipUrl = projectClipUrl(project);
       let blob: Blob;
       let extension: string;
+      let note: string | undefined;
+      let usedAudio = audio;
+
       if (audio) {
-        const result = await generateVideoWithAudio(
-          project,
-          format,
-          onProgress,
-          project.images ?? [],
-          {
-            voiceoverText: voiceoverTextFor(project) || undefined,
-            musicPrompt: musicPromptFor(project),
-            clipUrl,
-          }
-        );
-        blob = result.blob;
-        extension = result.extension;
+        try {
+          const result = await generateVideoWithAudio(
+            project,
+            format,
+            onProgress,
+            project.images ?? [],
+            {
+              voiceoverText: voiceoverTextFor(project) || undefined,
+              musicPrompt: musicPromptFor(project),
+              clipUrl,
+            }
+          );
+          blob = result.blob;
+          extension = result.extension;
+        } catch (audioErr) {
+          // Audio indisponible (souvent le plan ElevenLabs) : on sort quand
+          // même la vidéo, muette, avec le clip et les sous-titres.
+          usedAudio = false;
+          note =
+            (audioErr instanceof Error ? audioErr.message : "Audio indisponible.") +
+            " Vidéo générée sans son.";
+          onProgress(0);
+          const result = await generateVideo(
+            project,
+            format,
+            onProgress,
+            project.images ?? [],
+            clipUrl
+          );
+          blob = result.blob;
+          extension = result.extension;
+        }
       } else {
         const result = await generateVideo(
           project,
@@ -114,9 +137,9 @@ export function ExportsPanel({ project }: { project: VideoProject }) {
         extension = result.extension;
       }
 
-      const filename = `${slug}-${format.replace(":", "x")}${audio ? "-audio" : ""}.${extension}`;
-      cacheRef.current[cacheKey] = { blob, filename };
-      updateJob(format, { status: "done", progress: 100 });
+      const filename = `${slug}-${format.replace(":", "x")}${usedAudio ? "-audio" : ""}.${extension}`;
+      cacheRef.current[usedAudio ? cacheKey : format] = { blob, filename };
+      updateJob(format, { status: "done", progress: 100, note });
       downloadBlob(filename, blob);
     } catch (e) {
       updateJob(format, {
@@ -217,6 +240,11 @@ export function ExportsPanel({ project }: { project: VideoProject }) {
               {job.status === "error" && job.error && (
                 <p role="alert" className="mt-2 text-xs leading-relaxed text-red-700">
                   {job.error}
+                </p>
+              )}
+              {job.status === "done" && job.note && (
+                <p className="mt-2 text-xs leading-relaxed text-bronze-deep">
+                  {job.note}
                 </p>
               )}
             </li>
